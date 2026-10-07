@@ -922,48 +922,51 @@
     const isDoc = kind === 'document';
     const isMedia = kind === 'media';
 
-    // 1. Look inside open menus/popups first
-    const popups = [...document.querySelectorAll('[role="menu"], [role="listbox"], [data-testid*="menu" i], ul, div[tabindex="-1"]')].filter(visible);
-    const roots = popups.length ? popups : [document.querySelector('#main') || document.querySelector('#app') || document.body];
-
     const candidates = [];
     const seen = new Set();
 
-    for (const root of roots) {
-      const items = [...root.querySelectorAll('li, button, [role="menuitem"], [role="option"], [role="button"], div, span')].filter(visible);
-      for (const el of items) {
-        if (seen.has(el)) continue;
-        const text = clean(el.innerText || el.textContent || '');
-        const aria = clean(el.getAttribute('aria-label') || '');
-        const title = clean(el.getAttribute('title') || '');
-        const testid = clean(el.getAttribute('data-testid') || '');
-        const icon = clean(el.getAttribute('data-icon') || el.querySelector?.('[data-icon]')?.getAttribute('data-icon') || '');
+    // Query all interactive elements across the DOM
+    const elements = document.querySelectorAll(
+      'li, button, [role="button"], [role="menuitem"], [role="option"], [data-testid*="attach" i], [data-testid*="menu" i], label, div, span'
+    );
 
-        const meta = clean([text, aria, title, testid, icon].filter(Boolean).join(' ')).toLowerCase();
-        if (!meta || /call|status|voice/.test(meta)) continue;
+    for (const el of elements) {
+      if (!visible(el)) continue;
 
-        let score = 0;
-        if (isDoc) {
-          if (/^(document|documents|doc)$/i.test(text)) score += 5000;
-          else if (/^(document|documents|doc)$/i.test(aria) || /^(document|documents|doc)$/i.test(title)) score += 4500;
-          else if (/\bdocument\b/i.test(text) && text.length < 25) score += 2500;
-          else if (/document|attach-document|file-document/i.test(`${icon} ${testid}`)) score += 3000;
-          else if (/\bdocument\b/i.test(meta)) score += 1000;
-        } else if (isMedia) {
-          if (/^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(text)) score += 5000;
-          else if (/^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(aria) || /^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(title)) score += 4500;
-          else if (/\b(photos?|videos?|media|gallery)\b/i.test(text) && text.length < 30) score += 2500;
-          else if (/image|photo|video|media|gallery/i.test(`${icon} ${testid}`)) score += 3000;
-          else if (/\b(photos?|videos?|media)\b/i.test(meta)) score += 1000;
-        }
+      // Skip elements that are inside the message list in #main to avoid matching old chat messages
+      if (el.closest('.message-in, .message-out, [data-pre-plain-text]')) continue;
 
-        if (score > 0) {
-          seen.add(el);
-          const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li') || el;
-          const directInput = el.querySelector?.('input[type="file"]') || clickable.querySelector?.('input[type="file"]') || el.parentElement?.querySelector?.('input[type="file"]');
-          if (directInput) score += 1500;
-          candidates.push({ el: clickable, input: directInput, score, text, aria, testid });
-        }
+      const ownText = clean(el.innerText || el.textContent || '');
+      const aria = clean(el.getAttribute('aria-label') || '');
+      const title = clean(el.getAttribute('title') || '');
+      const testid = clean(el.getAttribute('data-testid') || '');
+      const icon = clean(el.getAttribute('data-icon') || el.querySelector?.('[data-icon]')?.getAttribute('data-icon') || '');
+
+      let score = 0;
+      if (isDoc) {
+        if (/^document$/i.test(ownText)) score += 6000;
+        else if (/^document$/i.test(aria) || /^document$/i.test(title)) score += 5500;
+        else if (/documents?$/i.test(ownText) && ownText.length < 20) score += 4000;
+        else if (/\bdocument\b/i.test(ownText) && ownText.length < 30) score += 3000;
+        else if (/attach-document|document/i.test(`${icon} ${testid}`)) score += 3500;
+      } else if (isMedia) {
+        if (/^photos?\s*(&|and)\s*videos?$/i.test(ownText) || /^photos?$/i.test(ownText)) score += 6000;
+        else if (/photos?\s*(&|and)\s*videos?/i.test(aria) || /photos?\s*(&|and)\s*videos?/i.test(title)) score += 5500;
+        else if (/\b(photos?|gallery|media)\b/i.test(ownText) && ownText.length < 30) score += 3000;
+        else if (/image|photo|gallery|attach-image/i.test(`${icon} ${testid}`)) score += 3500;
+      }
+
+      if (score > 0) {
+        const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li, label') || el;
+        if (seen.has(clickable)) continue;
+        seen.add(clickable);
+
+        const directInput = clickable.querySelector?.('input[type="file"]') ||
+                            el.querySelector?.('input[type="file"]') ||
+                            clickable.parentElement?.querySelector?.('input[type="file"]');
+        if (directInput) score += 2000;
+
+        candidates.push({ el: clickable, input: directInput, score, text: ownText, aria, testid });
       }
     }
 
@@ -1094,10 +1097,16 @@
       });
       clickLikeUser(attachButton);
       menuOpened = true;
-      await sleep(400);
+      await sleep(500);
     }
 
-    let menuItem = findAttachMenuItem(kind);
+    let menuItem = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      menuItem = findAttachMenuItem(kind);
+      if (menuItem) break;
+      await sleep(200);
+    }
+
     let input = menuItem?.input || null;
 
     if (!input && menuItem?.el) {
@@ -1108,7 +1117,7 @@
         aria: menuItem.aria
       });
       clickLikeUser(menuItem.el);
-      await sleep(350);
+      await sleep(400);
       input = menuItem.el.querySelector?.('input[type="file"]') || menuItem.el.parentElement?.querySelector?.('input[type="file"]');
     }
 
@@ -1117,12 +1126,12 @@
     }
 
     if (!input && menuOpened) {
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
         await sleep(300);
         menuItem = menuItem || findAttachMenuItem(kind);
         if (menuItem?.el && !input) {
           clickLikeUser(menuItem.el);
-          await sleep(250);
+          await sleep(300);
         }
         input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
         if (input) break;
