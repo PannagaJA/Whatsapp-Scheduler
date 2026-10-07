@@ -918,40 +918,67 @@
     return file;
   }
 
-  function findDocumentMenuItem() {
-    const menus = [...document.querySelectorAll('[role="menu"],[role="listbox"],[data-testid*="menu" i]')].filter(visible);
-    const roots = menus.length ? menus : [document.querySelector('#app') || document.body];
+  function findAttachMenuItem(kind = 'document') {
+    const isDoc = kind === 'document';
+    const isMedia = kind === 'media';
+
+    // 1. Look inside open menus/popups first
+    const popups = [...document.querySelectorAll('[role="menu"], [role="listbox"], [data-testid*="menu" i], ul, div[tabindex="-1"]')].filter(visible);
+    const roots = popups.length ? popups : [document.querySelector('#main') || document.querySelector('#app') || document.body];
+
     const candidates = [];
     const seen = new Set();
+
     for (const root of roots) {
-      const nodes = [...root.querySelectorAll('[role="menuitem"],[role="option"],[role="button"],button,[tabindex="0"],div,span')];
-      for (const el of nodes) {
-        if (seen.has(el) || !visible(el)) continue;
-        seen.add(el);
-        const aria=clean(el.getAttribute('aria-label')||''), title=clean(el.getAttribute('title')||'');
-        const testid=clean(el.getAttribute('data-testid')||''), icon=clean(el.getAttribute('data-icon')||'');
-        const own=clean(el.innerText||el.textContent||'');
-        const meta=clean([aria,title,testid,icon,own].filter(Boolean).join(' ')).toLowerCase();
-        if (!meta || /call|status|camera|sticker|gif|emoji/.test(meta)) continue;
-        const exact=/^(document|documents|doc)$/i.test(own) || /^(document|documents|doc)$/i.test(aria);
-        const word=/\bdocument\b/i.test(meta), iconMatch=/document|attach-document|file-document/i.test(`${icon} ${testid}`);
-        if (!exact && !word && !iconMatch) continue;
-        const r=el.getBoundingClientRect();
-        if (r.width<=0 || r.height<=0 || r.width>600 || r.height>250) continue;
-        let score=0;
-        if (exact) score+=5000;
-        if (iconMatch) score+=2500;
-        if (el.getAttribute('role')==='menuitem') score+=1200;
-        if (el.getAttribute('role')==='option') score+=900;
-        if (menus.includes(root)) score+=800;
-        if (word) score+=700;
-        candidates.push({el,score,own,aria,testid});
+      const items = [...root.querySelectorAll('li, button, [role="menuitem"], [role="option"], [role="button"], div, span')].filter(visible);
+      for (const el of items) {
+        if (seen.has(el)) continue;
+        const text = clean(el.innerText || el.textContent || '');
+        const aria = clean(el.getAttribute('aria-label') || '');
+        const title = clean(el.getAttribute('title') || '');
+        const testid = clean(el.getAttribute('data-testid') || '');
+        const icon = clean(el.getAttribute('data-icon') || el.querySelector?.('[data-icon]')?.getAttribute('data-icon') || '');
+
+        const meta = clean([text, aria, title, testid, icon].filter(Boolean).join(' ')).toLowerCase();
+        if (!meta || /call|status|voice/.test(meta)) continue;
+
+        let score = 0;
+        if (isDoc) {
+          if (/^(document|documents|doc)$/i.test(text)) score += 5000;
+          else if (/^(document|documents|doc)$/i.test(aria) || /^(document|documents|doc)$/i.test(title)) score += 4500;
+          else if (/\bdocument\b/i.test(text) && text.length < 25) score += 2500;
+          else if (/document|attach-document|file-document/i.test(`${icon} ${testid}`)) score += 3000;
+          else if (/\bdocument\b/i.test(meta)) score += 1000;
+        } else if (isMedia) {
+          if (/^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(text)) score += 5000;
+          else if (/^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(aria) || /^(photos?\s*(&|and)\s*videos?|photos?|videos?|media)$/i.test(title)) score += 4500;
+          else if (/\b(photos?|videos?|media|gallery)\b/i.test(text) && text.length < 30) score += 2500;
+          else if (/image|photo|video|media|gallery/i.test(`${icon} ${testid}`)) score += 3000;
+          else if (/\b(photos?|videos?|media)\b/i.test(meta)) score += 1000;
+        }
+
+        if (score > 0) {
+          seen.add(el);
+          const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li') || el;
+          const directInput = el.querySelector?.('input[type="file"]') || clickable.querySelector?.('input[type="file"]') || el.parentElement?.querySelector?.('input[type="file"]');
+          if (directInput) score += 1500;
+          candidates.push({ el: clickable, input: directInput, score, text, aria, testid });
+        }
       }
     }
-    candidates.sort((a,b)=>b.score-a.score);
-    debugLog('DOCUMENT_MENU_CANDIDATES', candidates.slice(0,10).map(x=>({score:x.score,ownText:x.own,aria:x.aria,testid:x.testid,tag:x.el.tagName,role:x.el.getAttribute('role')})));
-    if (candidates[0]?.el) return candidates[0].el.closest('button,[role="button"],[role="menuitem"],[role="option"]') || candidates[0].el;
-    return null;
+
+    candidates.sort((a, b) => b.score - a.score);
+    debugLog('ATTACH_MENU_ITEM_SEARCH', {
+      kind,
+      found: candidates.length,
+      top: candidates.slice(0, 5).map(c => ({ score: c.score, text: c.text, aria: c.aria, tag: c.el?.tagName, hasInput: !!c.input }))
+    });
+
+    return candidates[0] || null;
+  }
+
+  function findDocumentMenuItem() {
+    return findAttachMenuItem('document')?.el || null;
   }
 
   function isMediaOnlyInput(input) {
@@ -1057,6 +1084,7 @@
     debugLog('ATTACHMENT_RENDER_BASELINE', before);
 
     const attachButton = findAttachButton();
+    let menuOpened = false;
     if (attachButton) {
       debugLog('ATTACH_BUTTON_CLICK', {
         aria: attachButton.getAttribute('aria-label'),
@@ -1065,14 +1093,37 @@
         icon: attachButton.getAttribute('data-icon')
       });
       clickLikeUser(attachButton);
-      await sleep(350);
+      menuOpened = true;
+      await sleep(400);
     }
 
-    let input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
+    let menuItem = findAttachMenuItem(kind);
+    let input = menuItem?.input || null;
 
-    if (!input && attachButton) {
-      for (let attempt = 0; attempt < 4; attempt++) {
-        await sleep(250);
+    if (!input && menuItem?.el) {
+      debugLog('ATTACH_MENU_ITEM_CLICK', {
+        kind,
+        tag: menuItem.el.tagName,
+        text: menuItem.text,
+        aria: menuItem.aria
+      });
+      clickLikeUser(menuItem.el);
+      await sleep(350);
+      input = menuItem.el.querySelector?.('input[type="file"]') || menuItem.el.parentElement?.querySelector?.('input[type="file"]');
+    }
+
+    if (!input) {
+      input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
+    }
+
+    if (!input && menuOpened) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await sleep(300);
+        menuItem = menuItem || findAttachMenuItem(kind);
+        if (menuItem?.el && !input) {
+          clickLikeUser(menuItem.el);
+          await sleep(250);
+        }
         input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
         if (input) break;
       }
@@ -1112,7 +1163,7 @@
           });
         }
 
-        const deadline = Date.now() + 6000;
+        const deadline = Date.now() + 8000;
         let rejected = false;
         while (Date.now() < deadline) {
           const rejection = getAttachmentRejection();
@@ -1126,8 +1177,9 @@
           const selectedCount = [...document.querySelectorAll('input[type="file"]')]
             .reduce((n, el) => n + (el.files?.length || 0), 0);
           const state = captureAttachmentState(files);
-          if ((selectedCount >= files.length || pending.sendVisible || findAttachmentSendButton() || attachmentStateChanged(before, state)) && (pending.sendVisible || findAttachmentSendButton())) {
-            debugLog('ATTACHMENT_PREVIEW_READY', { kind, before, pending, selectedCount });
+          const hasSendBtn = !!findAttachmentSendButton() || !!findSendButton();
+          if ((selectedCount >= files.length || pending.sendVisible || hasSendBtn || attachmentStateChanged(before, state)) && (pending.sendVisible || hasSendBtn)) {
+            debugLog('ATTACHMENT_PREVIEW_READY', { kind, before, pending, selectedCount, hasSendBtn });
             return;
           }
           await sleep(250);
@@ -1135,7 +1187,7 @@
 
         if (!rejected) {
           const pending = captureAttachmentComposerState();
-          if (pending.sendVisible || findAttachmentSendButton()) {
+          if (pending.sendVisible || findAttachmentSendButton() || findSendButton()) {
             debugLog('ATTACHMENT_PREVIEW_READY_AFTER_WAIT', { kind, before, pending });
             return;
           }
@@ -1272,32 +1324,53 @@
 
   function findAttachmentSendButton() {
     const main = document.querySelector('#main');
-    if (!main || !visible(main)) return null;
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [data-testid*="popup" i], [data-testid*="drawer" i]')].filter(visible);
+    const scopes = [...dialogs, ...(main && visible(main) ? [main] : []), document.querySelector('#app') || document.body];
 
-    // In the current WhatsApp media composer there are two different kinds of
-    // "send" controls: the ordinary chat composer button (aria-label="Send")
-    // and the media-composer control which may be exposed as
-    // "Send 1 selected". For an attachment job we MUST prefer the latter.
-    const nodes = [...document.querySelectorAll(
-      '[aria-label^="Send"][aria-label*="selected" i],\n' +
-      '[aria-label*="Send 1 selected" i],\n' +
-      '[data-testid*="send-selected" i],\n' +
-      '[data-testid*="media-send" i]'
-    )].filter(visible);
+    const nodes = [];
+    const seen = new Set();
+    const selectors = [
+      '[aria-label^="Send"][aria-label*="selected" i]',
+      '[aria-label*="Send 1 selected" i]',
+      '[data-testid*="send-selected" i]',
+      '[data-testid*="media-send" i]',
+      'button[aria-label="Send"]',
+      '[role="button"][aria-label="Send"]',
+      'button[aria-label*="Send" i]',
+      '[role="button"][aria-label*="Send" i]',
+      '[data-testid="send"]',
+      '[data-testid*="send" i]',
+      '[data-icon="wds-ic-send-filled"]',
+      '[data-icon="send"]'
+    ];
+
+    for (const scope of scopes) {
+      if (!scope) continue;
+      for (const sel of selectors) {
+        for (const el of scope.querySelectorAll(sel)) {
+          if (visible(el) && !seen.has(el)) {
+            seen.add(el);
+            nodes.push(el);
+          }
+        }
+      }
+    }
 
     const caption = findCaptionComposer();
     const cr = caption?.getBoundingClientRect();
     const candidates = [];
-    const seen = new Set();
+    const seenButtons = new Set();
 
     for (const node of nodes) {
       const button = getClickable(node);
-      if (!button || seen.has(button)) continue;
-      seen.add(button);
+      if (!button || seenButtons.has(button)) continue;
+      seenButtons.add(button);
       const r = button.getBoundingClientRect();
       let score = 2000;
-      if (main.contains(button)) score += 500;
-      if (/send\s*\d+\s*selected/i.test(clean(node.getAttribute('aria-label')))) score += 1200;
+      if (main?.contains(button)) score += 500;
+      if (/send\s*\d+\s*selected/i.test(clean(node.getAttribute('aria-label')))) score += 1500;
+      if (/^send$/i.test(clean(node.getAttribute('aria-label')))) score += 1000;
+      if (button.closest('[role="dialog"]')) score += 1200;
       if (cr) {
         const verticalOverlap = Math.min(r.bottom, cr.bottom) - Math.max(r.top, cr.top);
         if (verticalOverlap > 0) score += 700;
