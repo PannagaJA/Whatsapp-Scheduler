@@ -1,0 +1,1 @@
+async function load(){const r=await chrome.runtime.sendMessage({type:'GET_DEBUG'});document.getElementById('out').textContent=JSON.stringify(r,null,2)};refresh.onclick=load;clear.onclick=async()=>{await chrome.runtime.sendMessage({type:'CLEAR_DEBUG'});load()};load();

@@ -1,0 +1,48 @@
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editor & IDE Directories
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+
+# Logs and Runtime Data
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build, Packaging & Distribution Artifacts
+dist/
+build/
+out/
+*.zip
+*.crx
+*.pem
+
+# Dependencies (if toolchains are added)
+node_modules/
+.pnp
+.pnp.js
+
+# Temporary Files & Scratch Dirs
+tmp/
+temp/
+.cache/
+.scratch/
