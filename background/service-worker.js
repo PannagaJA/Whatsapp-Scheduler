@@ -336,7 +336,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === 'DEBUG_LOG') {
         await addDebugLog(message.entry || { message: 'unknown', time: new Date().toISOString() });
         sendResponse({ success: true });
-      } else if (message.type === 'GET_DIAGNOSTICS') {
+      } else if (message.type === 'GET_DIAGNOSTICS' || message.type === 'GET_DEBUG') {
         const tab = await findWhatsAppTab();
         let page = null;
         if (tab) {
@@ -348,8 +348,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         const { debugLogs = [] } = await chrome.storage.local.get('debugLogs');
-        sendResponse({ success: true, tab: tab ? { id: tab.id, url: tab.url, title: tab.title } : null, page, logs: debugLogs });
-      } else if (message.type === 'CLEAR_DEBUG_LOGS') {
+        const messages = await getMessages();
+        sendResponse({ success: true, tab: tab ? { id: tab.id, url: tab.url, title: tab.title } : null, page, messages, logs: debugLogs });
+      } else if (message.type === 'CLEAR_DEBUG_LOGS' || message.type === 'CLEAR_DEBUG') {
         await chrome.storage.local.set({ debugLogs: [] });
         sendResponse({ success: true });
       } else if (message.type === 'CREATE_SCHEDULE') {

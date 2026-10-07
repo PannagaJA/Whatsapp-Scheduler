@@ -556,16 +556,17 @@
   }
 
   async function openContact(contact) {
-    const name=clean(contact?.name);
-    if(!name) throw new Error('Recipient name is empty.');
-    debugLog('OPEN_CONTACT',{name,current:getHeaderTitle()});
-    const current=clean(getHeaderTitle());
+    const name = clean(contact?.name);
+    if (!name) throw new Error('Recipient name is empty.');
+    debugLog('OPEN_CONTACT', { name, current: getHeaderTitle() });
+    const current = clean(getHeaderTitle());
     const currentGeneric = !current || GENERIC_LABELS.has(current.toLowerCase()) || /^(profile details|contact info|conversation info)$/i.test(current);
-    if(!currentGeneric && current.toLowerCase()===name.toLowerCase()) return;
+    if (!currentGeneric && (current.toLowerCase() === name.toLowerCase() || current.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(current.toLowerCase()))) {
+      if (document.querySelector('#main') && visible(document.querySelector('#main'))) {
+        return;
+      }
+    }
 
-    // If WhatsApp is showing a contact/profile details pane, close it before
-    // attempting recipient selection. This prevents a header label such as
-    // 'Profile details' from being mistaken for the active conversation.
     if (currentGeneric) {
       const close = [...document.querySelectorAll('#main button,[role="button"]')].filter(visible).find(el => {
         const meta = clean(`${el.getAttribute('aria-label')||''} ${el.getAttribute('title')||''} ${el.getAttribute('data-testid')||''}`).toLowerCase();
@@ -574,37 +575,61 @@
       if (close) { try { close.click(); await sleep(300); } catch (_) {} }
     }
 
-    // First use an already-visible chat in the sidebar.
-    if(clickChatRow(name)){
-      debugLog('OPEN_CONTACT_VISIBLE_CHAT',{name});
-      try { await waitForHeader(name,5000); return; } catch (_) {}
+    let opened = false;
+    if (clickChatRow(name)) {
+      debugLog('OPEN_CONTACT_VISIBLE_CHAT', { name });
+      try {
+        await waitForHeader(name, 3500);
+        await waitForMainPane(3500);
+        opened = true;
+      } catch (_) {
+        debugLog('OPEN_CONTACT_VISIBLE_CHAT_FAILED', { name });
+      }
     }
 
-    const search=findSearchBox();
-    if(!search) throw new Error('Recipient search box not found in WhatsApp sidebar.');
-    debugLog('OPEN_CONTACT_RECIPIENT_SEARCH',{name,tag:search.tagName,placeholder:search.getAttribute('placeholder')||search.getAttribute('data-placeholder'),aria:search.getAttribute('aria-label')});
-    await clearAndType(search,name);
+    if (!opened) {
+      const search = findSearchBox();
+      if (!search) throw new Error('Recipient search box not found in WhatsApp sidebar.');
+      debugLog('OPEN_CONTACT_RECIPIENT_SEARCH', {
+        name,
+        tag: search.tagName,
+        placeholder: search.getAttribute('placeholder') || search.getAttribute('data-placeholder'),
+        aria: search.getAttribute('aria-label')
+      });
+      await clearAndType(search, name);
+      await sleep(1500);
 
-    // Give WhatsApp time to render search results, then click the actual result.
-    await sleep(1500);
-    if(!clickChatRow(name)){
-      // Some WhatsApp builds render search results outside the normal chat-row
-      // selectors. Look for an exact visible text/title inside the sidebar.
-      const result=findSidebarResult(name);
-      if(!result) throw new Error(`Recipient not found in WhatsApp sidebar: ${name}`);
-      result.click();
+      if (!clickChatRow(name)) {
+        const result = findSidebarResult(name);
+        if (result) {
+          result.click();
+        } else {
+          search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+        }
+      }
+
+      await waitForHeader(name, 8000);
+      await waitForMainPane(8000);
     }
-
-    await waitForHeader(name,8000);
   }
 
-
-  async function waitForHeader(expected, timeout = 7000) {
-    const wanted = clean(expected).toLowerCase();
+  async function waitForMainPane(timeout = 8000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const current = clean(getHeaderTitle()).toLowerCase();
-      if (current === wanted || current.includes(wanted) || wanted.includes(current)) return;
+      const main = document.querySelector('#main');
+      if (main && visible(main)) return true;
+      await sleep(250);
+    }
+    throw new Error('WhatsApp chat pane (#main) did not open.');
+  }
+
+  async function waitForHeader(expected, timeout = 7000) {
+    const wanted = clean(expected).toLowerCase().replace(/\s+/g, '');
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const current = clean(getHeaderTitle()).toLowerCase().replace(/\s+/g, '');
+      const main = document.querySelector('#main');
+      if (main && visible(main) && current && (current === wanted || current.includes(wanted) || wanted.includes(current))) return;
       await sleep(250);
     }
     throw new Error(`WhatsApp did not open the chat “${expected}”.`);
@@ -758,17 +783,44 @@
     return null;
   }
 
+  const MIME_EXT_MAP = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+    mp4: 'video/mp4', mov: 'video/quicktime', '3gp': 'video/3gpp',
+    pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', json: 'application/json', zip: 'application/zip',
+    doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  };
+
+  function inferMimeType(name, type) {
+    if (type && type !== 'application/octet-stream') return type;
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return MIME_EXT_MAP[ext] || type || 'application/octet-stream';
+  }
+
+  function isMediaFile(file) {
+    const name = String(file?.name || '').toLowerCase();
+    const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
+    if (ext === 'svg') return false;
+    const type = String(file?.type || inferMimeType(name, '')).toLowerCase();
+    const isImage = (type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) && ext !== 'svg';
+    const isVideo = type.startsWith('video/') || ['mp4', 'mov', '3gp'].includes(ext);
+    return isImage || isVideo;
+  }
+
+  function areAllMediaFiles(files) {
+    return Array.isArray(files) && files.length > 0 && files.every(isMediaFile);
+  }
+
   function attachmentKind(files) {
-    // Scheduled files must arrive byte-for-byte unchanged. WhatsApp's media
-    // path may resize/re-encode images or videos, so the scheduler deliberately
-    // sends EVERY scheduled file through the document path. This also allows
-    // arbitrary extensions/MIME types instead of maintaining a fragile allowlist.
+    if (areAllMediaFiles(files)) return 'media';
     return 'document';
   }
 
   function findFileInput(preferredFiles = [], kind = 'document') {
     const inputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled);
     if (!inputs.length) return null;
+    const isMedia = kind === 'media' || areAllMediaFiles(preferredFiles);
     const wantedTypes = preferredFiles.map(f => String(f.type || '').toLowerCase()).filter(Boolean);
     const wantedExts = preferredFiles.map(f => { const n = String(f.name || '').toLowerCase(); return n.includes('.') ? n.slice(n.lastIndexOf('.')) : ''; }).filter(Boolean);
     const contextOf = input => {
@@ -777,27 +829,39 @@
       return clean(bits.join(' ')).toLowerCase();
     };
     const score = input => {
-      const accept = String(input.accept || '').toLowerCase(); const context = contextOf(input); let s = 0;
-      if (/sticker|emoji|gif sticker/.test(context) || /sticker/.test(accept)) s -= 10000;
+      const accept = String(input.accept || '').toLowerCase();
+      const mediaOnly = isMediaOnlyInput(input);
+      const context = contextOf(input);
+      let s = 0;
+      if (/sticker|emoji|gif sticker/.test(context) || /sticker/.test(accept)) s -= 15000;
       if (/profile|avatar|status/.test(context)) s -= 5000;
-      if (!accept || accept === '*/*') s += 25;
-      if (input.multiple) s += 20;
-      // Exact-byte mode: strongly prefer a broad/document input and reject
-      // media-only inputs, because media uploads can be transformed by WhatsApp.
-      if (kind === 'document') {
-        if (/photos?\s*(and|&)\s*videos?|media|camera/.test(context)) s -= 5000;
-        if (/image\/\*|video\/\*/.test(accept)) s -= 1800;
-        if (accept.includes('application/')) s += 350; if (accept.includes('text/')) s += 300;
-        if (!accept || accept === '*/*') s += 500;
-        if (/document|file|attach/.test(context)) s += 1200;
+      if (input.multiple) s += 50;
+
+      if (isMedia) {
+        if (/photos?\s*(and|&)\s*videos?|media|camera|gallery/.test(context)) s += 3000;
+        if (/image\/\*|video\/\*/.test(accept)) s += 4000;
+        if (accept.includes('image/') || accept.includes('video/')) s += 2000;
+      } else {
+        // Document/general files (CSV, PDF, TXT, DOCX, ZIP, etc.)
+        if (mediaOnly) s -= 30000;
+        if (/photos?\s*(and|&)\s*videos?|camera/.test(context)) s -= 10000;
+        if (/image\/\*|video\/\*/.test(accept)) s -= 15000;
+        if (!mediaOnly) s += 10000;
+        if (!accept || accept === '*' || accept === '*/*') s += 6000;
+        if (accept.includes('application/')) s += 3000;
+        if (accept.includes('text/')) s += 3000;
+        if (/document|file|doc/.test(context)) s += 4000;
       }
-      for (const type of wantedTypes) { if (accept.includes(type)) s += 350; const family = type.split('/')[0]; if (family && accept.includes(`${family}/*`)) s += 150; }
-      for (const ext of wantedExts) if (accept.includes(ext)) s += 180;
+
+      for (const type of wantedTypes) { if (accept.includes(type)) s += 500; const family = type.split('/')[0]; if (family && accept.includes(`${family}/*`)) s += 250; }
+      for (const ext of wantedExts) if (accept.includes(ext)) s += 350;
       return s;
     };
     const ranked = inputs.map(input => ({ input, score: score(input), accept: input.accept, context: contextOf(input) })).sort((a,b)=>b.score-a.score);
     debugLog('ATTACHMENT_INPUT_CANDIDATES', ranked.slice(0,10).map(x=>({score:x.score,accept:x.accept,multiple:x.input.multiple,visible:visible(x.input),context:x.context.slice(0,180)})));
-    return ranked.find(x => x.score > -5000)?.input || null;
+    const best = ranked[0];
+    if (isMedia) return best?.input || null;
+    return (best && best.score > -10000) ? best.input : null;
   }
 
   async function sha256Hex(input) {
@@ -844,7 +908,7 @@
     // the original MIME in diagnostics. This avoids WhatsApp routing the file
     // back through a media-specific validator.
     const originalType = meta.type || '';
-    const uploadType = originalType || 'application/octet-stream';
+    const uploadType = inferMimeType(meta.name, originalType);
     const file = new File([blob], meta.name, { type: uploadType, lastModified });
     debugLog('ATTACHMENT_FILE_RECONSTRUCTED', {
       name: file.name, type: file.type, originalType, uploadType, size: file.size, expectedSize: meta.size,
@@ -892,35 +956,34 @@
 
   function isMediaOnlyInput(input) {
     const accept = String(input?.accept || '').toLowerCase().replace(/\s+/g,'');
-    return /(^|,)(image\/\*|video\/\*)(,|$)/.test(accept) && !/application\/|text\/|\*\/\*/.test(accept);
+    if (!accept || accept === '*' || accept === '*/*') return false;
+    return /(^|,)(image\/\*|video\/\*)(,|$)/.test(accept) && !/application\/|text\/|\*\/\*|^\*$/.test(accept);
   }
 
   function rankDocumentInput(inputs) {
-    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file').map(input => {
+    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file' && !isMediaOnlyInput(el)).map(input => {
       const accept = String(input.accept || '').toLowerCase();
       const context = clean([
         input.getAttribute('aria-label'), input.getAttribute('title'), input.getAttribute('data-testid'),
         input.getAttribute('data-icon'), input.parentElement?.innerText || ''
       ].filter(Boolean).join(' ')).toLowerCase();
-      let score = 0;
-      if (!isMediaOnlyInput(input)) score += 5000;
-      if (!accept || accept === '*/*') score += 1200;
-      if (/application\//.test(accept)) score += 800;
-      if (/text\//.test(accept)) score += 500;
-      if (/document|file|attach/.test(context)) score += 700;
-      if (/image|video|photo|camera|media/.test(context)) score -= 5000;
-      if (/image\/\*|video\/\*/.test(accept)) score -= 4000;
+      let score = 5000;
+      if (!accept || accept === '*' || accept === '*/*') score += 2000;
+      if (/application\//.test(accept)) score += 1200;
+      if (/text\//.test(accept)) score += 800;
+      if (/document|file|attach/.test(context)) score += 1000;
       if (input.multiple) score += 200;
       return {input, score, accept, multiple:input.multiple, context};
     }).sort((a,b)=>b.score-a.score);
     debugLog('DOCUMENT_INPUT_RANKED', ranked.slice(0,10).map(x=>({score:x.score,accept:x.accept,multiple:x.multiple,connected:x.input.isConnected,visible:visible(x.input),context:x.context.slice(0,160)})));
-    return ranked.find(x => !isMediaOnlyInput(x.input))?.input || null;
+    return ranked[0]?.input || null;
   }
 
   async function attachFilesViaDrop(files) {
     const main = document.querySelector('#main');
     const footer = main?.querySelector('footer');
-    const targets = [footer, main].filter(Boolean).filter(visible);
+    const app = document.querySelector('#app');
+    const targets = [footer, main, app, document.body].filter(Boolean).filter(visible);
     if (!targets.length) return false;
 
     const before = captureAttachmentState(files);
@@ -938,24 +1001,29 @@
         cancelable: true,
         composed: true,
         dataTransfer: transfer,
-        clientX: Math.round(rect.left + rect.width / 2),
+        clientX: Math.round(rect.left + Math.max(1, rect.width / 2)),
         clientY: Math.round(rect.top + Math.max(1, rect.height / 2)),
-        screenX: window.screenX + Math.round(rect.left + rect.width / 2),
+        screenX: window.screenX + Math.round(rect.left + Math.max(1, rect.width / 2)),
         screenY: window.screenY + Math.round(rect.top + Math.max(1, rect.height / 2))
       };
       try { target.dispatchEvent(new DragEvent('dragenter', init)); } catch (_) {}
       try { target.dispatchEvent(new DragEvent('dragover', init)); } catch (_) {}
       try { target.dispatchEvent(new DragEvent('drop', init)); } catch (_) {}
       debugLog('ATTACHMENT_DROP_DISPATCHED', {tag: target.tagName, className: String(target.className || '').slice(0,120)});
-      await sleep(500);
+    }
+
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      await sleep(250);
       const rejection = getAttachmentRejection();
       if (rejection) {
         debugLog('ATTACHMENT_DROP_REJECTED', {message: rejection});
-        continue;
+        return false;
       }
+      const pending = captureAttachmentComposerState();
       const state = captureAttachmentState(files);
-      if (attachmentStateChanged(before, state)) {
-        debugLog('ATTACHMENT_DROP_PREVIEW_READY', {before, state});
+      if (pending.sendVisible || findAttachmentSendButton() || attachmentStateChanged(before, state)) {
+        debugLog('ATTACHMENT_DROP_PREVIEW_READY', {before, state, pending});
         return true;
       }
     }
@@ -969,7 +1037,7 @@
     for (const meta of attachments) {
       const file = await getAttachmentFile(meta);
       if (Number.isFinite(meta.size) && file.size !== meta.size) {
-        throw new Error(`Attachment size mismatch for ${meta.name}: expected ${meta.size} bytes, got ${files[i]?.size ?? "unknown"} bytes.`);
+        throw new Error(`Attachment size mismatch for ${meta.name}: expected ${meta.size} bytes, got ${file.size} bytes.`);
       }
       files.push(file);
     }
@@ -977,117 +1045,121 @@
     for (let i = 0; i < files.length; i++) {
       const hash = await sha256Hex(await files[i].arrayBuffer());
       const meta = attachments[i] || {};
-      if (meta.size != null && files[i].size !== meta.size) throw new Error(`Attachment size mismatch for ${file.name}: expected ${meta.size} bytes, got ${files[i]?.size ?? "unknown"} bytes.`);
+      if (meta.size != null && files[i].size !== meta.size) throw new Error(`Attachment size mismatch for ${files[i].name}: expected ${meta.size} bytes, got ${files[i].size} bytes.`);
       if (meta.hash && hash !== meta.hash) throw new Error(`Attachment content mismatch for ${files[i].name}: the scheduled bytes are not the original file.`);
       fileIntegrity.push({ name: files[i].name, type: files[i].type, size: files[i].size, expectedSize: meta.size, hash, expectedHash: meta.hash || null, exactBytes: !meta.hash || hash === meta.hash });
     }
     debugLog('ATTACHMENT_FILE_INTEGRITY', fileIntegrity);
     const kind = attachmentKind(files);
+    const isMedia = kind === 'media';
 
-    const attachButton = findAttachButton();
-    if (!attachButton) throw new Error('WhatsApp attachment button was not found.');
-
-    debugLog('ATTACH_BUTTON_CLICK', {
-      aria: attachButton.getAttribute('aria-label'),
-      title: attachButton.getAttribute('title'),
-      testid: attachButton.getAttribute('data-testid'),
-      icon: attachButton.getAttribute('data-icon')
-    });
-
-    // Clicking ONLY the paperclip is intentional. We do not search/click generic
-    // "video", "photo", or "document" divs because those words also occur in
-    // call controls and chat content.
-    clickLikeUser(attachButton);
-    await sleep(350);
-
-    // Never click WhatsApp's Document menu item from a scheduled/background run.
-    // That path invokes the browser's native file chooser and Chrome correctly
-    // rejects it without trusted user activation. WhatsApp already exposes a
-    // hidden broad/document file input after the paperclip is opened; use that
-    // input directly.
-    const input = findFileInput(files, kind) || rankDocumentInput([...document.querySelectorAll('input[type="file"]')]);
-    if (!input || isMediaOnlyInput(input)) {
-      throw new Error('WhatsApp Document attachment input was not found; the available input is a photo/video input.');
-    }
-
-    debugLog('DOCUMENT_INPUT_SELECTED', {
-      accept: input.accept,
-      multiple: input.multiple,
-      connected: input.isConnected,
-      visible: visible(input)
-    });
-
-    // IMPORTANT: capture the UI state BEFORE assigning the files. The previous
-    // build captured it after input.files was assigned, so when WhatsApp had
-    // already rendered the preview the baseline and the rendered state were
-    // identical and the scheduler falsely reported "did not render".
     const before = captureAttachmentState(files);
     debugLog('ATTACHMENT_RENDER_BASELINE', before);
 
-    try { input.value = ''; } catch (_) {}
-    const transfer = new DataTransfer();
-    for (const file of files) transfer.items.add(file);
-    input.files = transfer.files;
-
-    // WhatsApp's file input is React-controlled. Fire both events, including a
-    // composed event, after the FileList has been assigned.
-    try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
-    try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
-
-    const assigned = [...(input.files || [])];
-    if (assigned.length !== files.length) throw new Error(`WhatsApp received ${assigned.length} attachment(s), expected ${files.length}.`);
-    for (let i = 0; i < files.length; i++) {
-      const original = files[i];
-      const selected = assigned[i];
-      if (selected.name !== original.name || selected.size !== original.size || String(selected.type || '') !== String(original.type || '')) {
-        throw new Error(`WhatsApp file input changed ${original.name}: expected ${original.name} (${original.size} bytes, ${original.type}), got ${selected.name} (${selected.size} bytes, ${selected.type}).`);
-      }
-      // Verify the selected Blob against the exact scheduled bytes without
-      // converting the whole file to base64 or allocating another full-size
-      // ArrayBuffer. The stored hash was calculated before scheduling; here we
-      // verify name/size/type and the actual bytes through the Blob itself.
-      if (selected.size !== original.size) throw new Error(`WhatsApp file input size changed for ${original.name}.`);
-      const selectedSample = await selected.slice(0, Math.min(selected.size, 1024 * 1024)).arrayBuffer();
-      const originalSample = await original.slice(0, Math.min(original.size, 1024 * 1024)).arrayBuffer();
-      const a = new Uint8Array(selectedSample), b = new Uint8Array(originalSample);
-      if (a.length !== b.length || a.some((v, i) => v !== b[i])) throw new Error(`WhatsApp file input content changed for ${original.name}.`);
+    const attachButton = findAttachButton();
+    if (attachButton) {
+      debugLog('ATTACH_BUTTON_CLICK', {
+        aria: attachButton.getAttribute('aria-label'),
+        title: attachButton.getAttribute('title'),
+        testid: attachButton.getAttribute('data-testid'),
+        icon: attachButton.getAttribute('data-icon')
+      });
+      clickLikeUser(attachButton);
+      await sleep(350);
     }
-    debugLog('ATTACHMENT_INPUT_ASSIGNED', {
-      count: assigned.length,
-      names: assigned.map(f => f.name),
-      sizes: assigned.map(f => f.size),
-      types: assigned.map(f => f.type),
-      hashes: await Promise.all(assigned.map(f => sha256Hex(f.arrayBuffer()))),
-      accept: input.accept,
-      exactBytes: true
-    });
 
-    const deadline = Date.now() + 12000;
-    while (Date.now() < deadline) {
-      const rejection = getAttachmentRejection();
-      if (rejection) {
-        debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
-        const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; throw e;
+    let input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
+
+    if (!input && attachButton) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await sleep(250);
+        input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
+        if (input) break;
       }
-      const pending = captureAttachmentComposerState();
-      const selectedCount = [...document.querySelectorAll('input[type="file"]')]
-        .reduce((n, el) => n + (el.files?.length || 0), 0);
-      // The selected FileList is the authoritative hand-off point: WhatsApp's
-      // composer may not expose a stable filename/preview DOM marker, and the
-      // filename can already exist in chat history. Once the document input
-      // contains our exact file and a Send control is present, proceed.
-      if (selectedCount >= files.length && pending.sendVisible) {
-        debugLog('ATTACHMENT_PREVIEW_READY', { kind, before, pending, selectedCount });
-        return;
-      }
-      await sleep(250);
     }
+
+    // Strictly ensure non-media documents are not fed into media-only inputs
+    if (!isMedia && input && isMediaOnlyInput(input)) {
+      debugLog('ATTACHMENT_MEDIA_INPUT_REJECTED_FOR_DOCUMENT', { accept: input.accept });
+      input = rankDocumentInput([...document.querySelectorAll('input[type="file"]')]);
+    }
+
+    if (input) {
+      debugLog('ATTACHMENT_INPUT_SELECTED', {
+        accept: input.accept,
+        multiple: input.multiple,
+        connected: input.isConnected,
+        visible: visible(input)
+      });
+
+      try {
+        try { input.value = ''; } catch (_) {}
+        const transfer = new DataTransfer();
+        for (const file of files) transfer.items.add(file);
+        input.files = transfer.files;
+
+        try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
+        try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+
+        const assigned = [...(input.files || [])];
+        if (assigned.length === files.length) {
+          debugLog('ATTACHMENT_INPUT_ASSIGNED', {
+            count: assigned.length,
+            names: assigned.map(f => f.name),
+            sizes: assigned.map(f => f.size),
+            types: assigned.map(f => f.type),
+            accept: input.accept
+          });
+        }
+
+        const deadline = Date.now() + 6000;
+        let rejected = false;
+        while (Date.now() < deadline) {
+          const rejection = getAttachmentRejection();
+          if (rejection) {
+            debugLog('ATTACHMENT_REJECTED_ON_INPUT', { message: rejection, names: files.map(f => f.name) });
+            rejected = true;
+            try { input.value = ''; } catch (_) {}
+            break;
+          }
+          const pending = captureAttachmentComposerState();
+          const selectedCount = [...document.querySelectorAll('input[type="file"]')]
+            .reduce((n, el) => n + (el.files?.length || 0), 0);
+          const state = captureAttachmentState(files);
+          if ((selectedCount >= files.length || pending.sendVisible || findAttachmentSendButton() || attachmentStateChanged(before, state)) && (pending.sendVisible || findAttachmentSendButton())) {
+            debugLog('ATTACHMENT_PREVIEW_READY', { kind, before, pending, selectedCount });
+            return;
+          }
+          await sleep(250);
+        }
+
+        if (!rejected) {
+          const pending = captureAttachmentComposerState();
+          if (pending.sendVisible || findAttachmentSendButton()) {
+            debugLog('ATTACHMENT_PREVIEW_READY_AFTER_WAIT', { kind, before, pending });
+            return;
+          }
+        }
+      } catch (inputErr) {
+        debugLog('ATTACHMENT_INPUT_ERROR', { error: inputErr?.message || String(inputErr) });
+      }
+    }
+
+    // Fallback: If input was unavailable, or assigning didn't activate the composer, use drag-and-drop
+    debugLog('ATTACHMENT_FALLBACK_DROP_ATTEMPT', { fileCount: files.length });
+    const dropSucceeded = await attachFilesViaDrop(files);
+    if (dropSucceeded) {
+      debugLog('ATTACHMENT_DROP_SUCCESS', { fileCount: files.length });
+      return;
+    }
+
     const rejection = getAttachmentRejection();
     if (rejection) {
       debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
       const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; throw e;
     }
-    throw new Error('WhatsApp accepted the file input but did not activate the attachment composer.');
+
+    throw new Error('WhatsApp could not attach the scheduled file(s). Please ensure WhatsApp Web chat is fully loaded.');
   }
 
   function getAttachmentRejection() {
@@ -1477,20 +1549,15 @@
         const after = captureOutgoingState('', payload.attachments || []);
         const pending = captureAttachmentComposerState();
         last = { after, pending };
-        const bodyText = clean(document.body?.innerText || '').toLowerCase();
-        const unsupported = /file you tried adding is not supported|files? .*not supported|unsupported file/.test(bodyText);
+        const rejection = getAttachmentRejection();
         const attachmentEvidence =
           after.documentHits > before.documentHits ||
+          after.mediaHits > before.mediaHits ||
           after.filenameHits > before.filenameHits ||
           after.filenameOccurrences > before.filenameOccurrences ||
           after.outgoingNodes > before.outgoingNodes;
-        // WhatsApp can retain input.files and can also expose the ordinary
-        // conversation Send button immediately after the attachment is consumed.
-        // Therefore do NOT require the generic Send button to disappear. A new
-        // outgoing node/filename/document marker is the authoritative signal.
-        const composerClosed = true;
-        if (unsupported) {
-          const e = new Error('WhatsApp rejected one or more attachments as unsupported.'); e.noRetry = true; throw e;
+        if (rejection && !attachmentEvidence) {
+          const e = new Error(`WhatsApp rejected one or more attachments: ${rejection}`); e.noRetry = true; throw e;
         }
         if (attachmentEvidence) {
           debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending });
