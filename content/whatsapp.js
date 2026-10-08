@@ -414,7 +414,7 @@
     return editorTextMatches(getComposerText(el), value);
   }
 
-  async function typeIntoVerifiedEditor(findEditor, text, label) {
+  async function typeIntoVerifiedEditor(findEditor, text, label = 'message') {
     const expected = exactText(text);
     if (!expected) return findEditor();
     let editor = findEditor();
@@ -427,92 +427,10 @@
       dataTab: editor.getAttribute('data-tab'), inDialog: !!editor.closest('[role="dialog"]'), inFooter: !!editor.closest('footer')
     });
 
-    // Current WhatsApp Web contenteditables can process execCommand('insertText')
-    // twice. That was the source of the 877 -> 1755/2632 character corruption.
-    // Do NOT use execCommand or a synthetic paste here. Instead replace the
-    // contenteditable DOM once and send exactly one React-compatible input event.
-    for (let attempt = 1; attempt <= 4; attempt++) {
-      editor = findEditor() || editor;
-      if (!editor || !document.contains(editor)) { await sleep(150); continue; }
-      editor.focus();
-
-      // Clear the live React editor without using execCommand/delete, which can
-      // race with React's controlled state and restore the previous value.
-      try { editor.replaceChildren(); } catch (_) { try { editor.textContent = ''; } catch (_) {} }
-      try {
-        editor.dispatchEvent(new InputEvent('input', {
-          bubbles: true, composed: true, inputType: 'deleteContentBackward', data: null
-        }));
-      } catch (_) {
-        editor.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      }
-      await sleep(80);
-
-      let live = findEditor() || editor;
-      let current = getComposerText(live);
-      if (current !== '') {
-        debugLog('COMPOSER_CLEAR_RETRY', { attempt, actualLength: current.length, actual: current.slice(0, 300) });
-        await sleep(200);
-        continue;
-      }
-
-      // Build the exact visible text structure once. Newlines are represented by
-      // BR nodes, matching what WhatsApp creates when text is pasted into its
-      // contenteditable editor. No keyboard simulation and no second mutation.
-      try { live.replaceChildren(); } catch (_) { live.textContent = ''; }
-      const lines = expected.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i]) live.appendChild(document.createTextNode(lines[i]));
-        if (i < lines.length - 1) live.appendChild(document.createElement('br'));
-      }
-
-      // Exactly ONE input event after the DOM has the final value.
-      try {
-        live.dispatchEvent(new InputEvent('input', {
-          bubbles: true, composed: true, inputType: 'insertText', data: expected
-        }));
-      } catch (_) {
-        live.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-      }
-
-      await sleep(250);
-      live = findEditor() || live;
-      const actual = getComposerText(live);
-      if (editorTextMatches(actual, expected)) {
-        debugLog('MESSAGE_TYPED', {
-          expectedLength: expected.length,
-          actualLength: actual.length,
-          exact: true,
-          attempt,
-          method: 'dom-replacement-single-input'
-        });
-        return live;
-      }
-
-      debugLog('MESSAGE_TYPED_ATTEMPT_FAILED', {
-        attempt,
-        expectedLength: expected.length,
-        actualLength: actual.length,
-        actual: actual.slice(0, 500),
-        method: 'dom-replacement-single-input'
-      });
-      // If React transformed the node, the next attempt starts by clearing the
-      // current live node. Never append to a failed attempt.
-      await sleep(200);
-    }
-
-    const live = findEditor() || editor;
-    const actual = getComposerText(live);
-    debugLog('MESSAGE_TYPED_FAILED', {
-      expected,
-      actual,
-      expectedLength: expected.length,
-      actualLength: actual.length,
-      attempts: 4
-    });
-    const e = new Error(`WhatsApp ${label || 'message'} editor did not accept the exact scheduled text.`);
-    e.noRetry = false;
-    throw e;
+    const typed = await clearAndType(editor, expected);
+    const actual = getComposerText(typed);
+    debugLog('MESSAGE_TYPED', { expected, actual, matches: editorTextMatches(actual, expected) });
+    return typed;
   }
 
   function normalizeContactString(s) {
@@ -894,8 +812,10 @@
       try { input.files = transfer.files; } catch (_) {}
     }
 
-    try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
-    try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+    try { input.focus(); } catch (_) {}
+    try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true, cancelable: true })); } catch (_) {}
+    try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true, cancelable: true })); } catch (_) {}
+    try { input.dispatchEvent(new UIEvent('change', { bubbles: true, cancelable: true })); } catch (_) {}
     return true;
   }
 
@@ -930,20 +850,29 @@
 
   function isStickerElement(el) {
     if (!el) return false;
-    const bits = [];
-    let node = el;
-    for (let i = 0; node && i < 5; i++, node = node.parentElement) {
-      bits.push(
-        node.getAttribute?.('aria-label') || '',
-        node.getAttribute?.('title') || '',
-        node.getAttribute?.('data-testid') || '',
-        node.getAttribute?.('data-icon') || '',
-        node.className || '',
-        node.innerText || ''
-      );
+    const selfAttrs = [
+      el.getAttribute?.('aria-label'),
+      el.getAttribute?.('title'),
+      el.getAttribute?.('data-testid'),
+      el.getAttribute?.('data-icon')
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (/sticker|custom-sticker|attach-sticker/i.test(selfAttrs)) return true;
+
+    // Check ONLY the immediate interactive wrapper (li, button, or label)
+    const wrapper = el.closest('button, [role="button"], [role="menuitem"], li, label');
+    if (wrapper) {
+      const wrapperAttrs = [
+        wrapper.getAttribute?.('aria-label'),
+        wrapper.getAttribute?.('title'),
+        wrapper.getAttribute?.('data-testid'),
+        wrapper.getAttribute?.('data-icon')
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (/sticker|custom-sticker|attach-sticker/i.test(wrapperAttrs)) return true;
+
+      const directText = clean(wrapper.innerText || wrapper.textContent || '').toLowerCase();
+      if (/^new sticker$|^sticker$|create sticker/i.test(directText)) return true;
     }
-    const combined = bits.join(' ').toLowerCase();
-    return /sticker|custom-sticker|attach-sticker|create-sticker/i.test(combined);
+    return false;
   }
 
   function attachmentKind(files) {
@@ -1797,6 +1726,7 @@
       }
 
       // DISPATCH SEND
+      button.focus();
       button.click();
 
       const deadline = Date.now() + 15000;
@@ -1810,16 +1740,11 @@
         last = { after, pending };
         const rejection = getAttachmentRejection();
 
-        // The attachment preview closing is a key indicator of dispatch
-        const previewClosed = !findAttachmentSendButton() && !pending.sendSelected && !pending.captionEditors;
-
+        const isMedia = areAllMediaFiles(payload.attachments || []);
         const attachmentEvidence =
-          after.documentHits > before.documentHits ||
-          after.mediaHits > before.mediaHits ||
           after.filenameHits > before.filenameHits ||
           after.filenameOccurrences > before.filenameOccurrences ||
-          after.outgoingNodes > before.outgoingNodes ||
-          previewClosed;
+          (isMedia ? after.mediaHits > before.mediaHits : after.documentHits > before.documentHits);
 
         if (rejection && !attachmentEvidence) {
           const e = new Error(`WhatsApp rejected one or more attachments: ${rejection}`);
@@ -1827,16 +1752,19 @@
           e.stage = 'send-message';
           throw e;
         }
+
         if (attachmentEvidence) {
           attachmentDispatched = true;
-          debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending, previewClosed });
+          debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending });
           break;
         }
       }
 
       if (!attachmentDispatched) {
-        debugLog('ATTACHMENT_SEND_ASSUMED_DISPATCHED', { last });
-        attachmentDispatched = true;
+        const e = new Error(`WhatsApp attachment Send was clicked but attachment delivery was not confirmed. Last state: ${JSON.stringify(last)}`);
+        e.noRetry = true;
+        e.stage = 'send-message';
+        throw e;
       }
 
       // If caption was not supported/filled and text was requested, send as follow-up
