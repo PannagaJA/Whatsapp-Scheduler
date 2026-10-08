@@ -333,34 +333,30 @@
     }
 
     let current = el;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      if (!document.contains(current)) current = findComposer() || el;
-      if (!current) break;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (!document.contains(current)) break;
 
       if (replaceEditorContentsAtomically(current, value)) {
-        await sleep(120);
-        const check = findComposer() || current;
-        if (editorTextMatches(getComposerText(check), value)) return check;
-        current = check;
+        await sleep(100);
+        if (editorTextMatches(getComposerText(current), value)) return current;
       }
 
       try {
         if (hardClearContentEditable(current)) {
           insertExactText(current, value);
           dispatchEditorInput(current, 'insertText', value);
-          await sleep(120);
-          const check = findComposer() || current;
-          if (editorTextMatches(getComposerText(check), value)) return check;
-          current = check;
+          await sleep(100);
+          if (editorTextMatches(getComposerText(current), value)) return current;
         }
       } catch (_) {}
-      await sleep(180);
+      await sleep(150);
     }
 
-    const live = findComposer() || current || el;
-    const actual = getComposerText(live);
-    debugLog('MESSAGE_TYPED_FAILED', { expected:value, actual, expectedLength:value.length, actualLength:actual.length, attempts:5 });
-    const e = new Error('WhatsApp message editor did not accept the exact scheduled text.');
+    const actual = getComposerText(current);
+    if (editorTextMatches(actual, value)) return current;
+
+    debugLog('MESSAGE_TYPED_FAILED', { expected: value, actual, expectedLength: value.length, actualLength: actual.length });
+    const e = new Error('WhatsApp editor did not accept the exact scheduled text.');
     e.noRetry = false;
     throw e;
   }
