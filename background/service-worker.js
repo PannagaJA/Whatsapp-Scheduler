@@ -1,4 +1,4 @@
-const CONTENT_SCRIPT_VERSION = '1.4.38';
+const CONTENT_SCRIPT_VERSION = '1.4.39';
 const ALARM_PREFIX = 'wa-schedule:';
 const RETRY_PREFIX = 'wa-retry:';
 const RETRY_LIMIT = 2;

@@ -1,10 +1,11 @@
 (() => {
-  const EXTENSION_VERSION = '1.4.38';
+  const EXTENSION_VERSION = '1.4.39';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let activeSend = false;
   let sendQueue = Promise.resolve();
   let currentJobSendPressed = false;
   let currentJobDropAttempted = false;
+  let attachmentsAssigned = false;
 
   function visible(el) {
     if (!el) return false;
@@ -751,8 +752,19 @@
     return Array.isArray(files) && files.length > 0 && files.every(isMediaFile);
   }
 
+  function getMenuLabel(el) {
+    if (!el) return '';
+    const parent = el.closest('li, [role="listitem"], [role="menuitem"], button, [role="button"], label');
+    if (!parent) return '';
+    return clean(parent.innerText || parent.textContent || '').slice(0, 30);
+  }
+
   function isStickerElement(el) {
     if (!el) return false;
+    if (el.tagName === 'INPUT' && el.type === 'file') {
+      const accept = String(el.accept || '').trim().toLowerCase();
+      if (accept === 'image/*' && !el.multiple) return true;
+    }
     const selfAttrs = [
       el.getAttribute?.('aria-label'),
       el.getAttribute?.('title'),
@@ -761,8 +773,8 @@
     ].filter(Boolean).join(' ').toLowerCase();
     if (/sticker|custom-sticker|attach-sticker/i.test(selfAttrs)) return true;
 
-    // Check ONLY the immediate interactive wrapper (li, button, or label)
-    const wrapper = el.closest('button, [role="button"], [role="menuitem"], li, label');
+    // Check immediate interactive wrapper (li, [role="listitem"], [role="menuitem"], button, label)
+    const wrapper = el.closest('button, [role="button"], [role="menuitem"], [role="listitem"], li, label');
     if (wrapper) {
       const wrapperAttrs = [
         wrapper.getAttribute?.('aria-label'),
@@ -773,9 +785,84 @@
       if (/sticker|custom-sticker|attach-sticker/i.test(wrapperAttrs)) return true;
 
       const directText = clean(wrapper.innerText || wrapper.textContent || '').toLowerCase();
-      if (/^new sticker$|^sticker$|create sticker/i.test(directText)) return true;
+      if (/sticker/i.test(directText)) return true;
     }
     return false;
+  }
+
+  function selectFileInput(allInputs, files) {
+    const isAllMedia = areAllMediaFiles(files);
+    const validInputs = allInputs.filter(inp => {
+      if (!inp || !inp.isConnected || inp.disabled) return false;
+      const accept = String(inp.accept || '').trim().toLowerCase();
+      const menuLabel = getMenuLabel(inp);
+      if (accept === 'image/*' && !inp.multiple) return false;
+      if (/sticker/i.test(menuLabel)) return false;
+      if (isStickerElement(inp)) return false;
+      return true;
+    });
+
+    if (isAllMedia) {
+      // 1. If ALL files are image/video: select the input whose accept includes "video" (multiple:true)
+      const videoInput = validInputs.find(inp => {
+        const accept = String(inp.accept || '').toLowerCase();
+        return accept.includes('video') && inp.multiple;
+      }) || validInputs.find(inp => {
+        const accept = String(inp.accept || '').toLowerCase();
+        return accept.includes('video');
+      });
+
+      if (videoInput) {
+        return {
+          input: videoInput,
+          reason: 'media_video_accept',
+          menuLabel: getMenuLabel(videoInput)
+        };
+      }
+
+      // 2. If none exists after 4s, fall back to document input (accept "*" / "")
+      const docInput = validInputs.find(inp => {
+        const accept = String(inp.accept || '').trim().toLowerCase();
+        return (accept === '*' || accept === '' || accept === '*/*') && inp.multiple;
+      }) || validInputs.find(inp => {
+        const accept = String(inp.accept || '').trim().toLowerCase();
+        return accept === '*' || accept === '' || accept === '*/*';
+      });
+
+      if (docInput) {
+        debugLog('ATTACHMENT_FALLBACK_AS_DOCUMENT', {
+          accept: docInput.accept,
+          multiple: docInput.multiple,
+          menuLabel: getMenuLabel(docInput)
+        });
+        return {
+          input: docInput,
+          reason: 'fallback_as_document',
+          menuLabel: getMenuLabel(docInput)
+        };
+      }
+
+      return null;
+    } else {
+      // If ANY file is not image/video: select document input (accept "*", "", or "*/*"; multiple: true)
+      const docInput = validInputs.find(inp => {
+        const accept = String(inp.accept || '').trim().toLowerCase();
+        return (accept === '*' || accept === '' || accept === '*/*') && inp.multiple;
+      }) || validInputs.find(inp => {
+        const accept = String(inp.accept || '').trim().toLowerCase();
+        return accept === '*' || accept === '' || accept === '*/*';
+      }) || validInputs.find(inp => !isMediaOnlyInput(inp));
+
+      if (docInput) {
+        return {
+          input: docInput,
+          reason: 'document_input',
+          menuLabel: getMenuLabel(docInput)
+        };
+      }
+
+      return null;
+    }
   }
 
   function attachmentKind(files) {
@@ -1125,6 +1212,21 @@
     throw err;
   }
 
+  async function waitForNoPreview(timeout = 5000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (!isPreviewOpen()) {
+        const sendBtn = [...document.querySelectorAll('button, [role="button"], [aria-label]')]
+          .filter(visible)
+          .filter(el => !el.closest('footer'))
+          .find(el => /^Send( \d+ selected)?$/i.test(clean(el.getAttribute('aria-label') || '')));
+        if (!sendBtn) return true;
+      }
+      await sleep(200);
+    }
+    return !isPreviewOpen();
+  }
+
   async function attachFiles(attachments) {
     if (!attachments?.length) return;
 
@@ -1146,95 +1248,73 @@
     }
     debugLog('ATTACHMENT_FILE_INTEGRITY', fileIntegrity);
     const kind = attachmentKind(files);
-    const isMedia = kind === 'media';
 
-    // Before attaching, run clearEditor on footer composer so the footer Send button is not visible because of leftover text
-    const footerComposer = findComposer();
-    if (footerComposer) {
-      await clearEditor(footerComposer);
-    }
+    for (let fullAttempt = 0; fullAttempt < 2; fullAttempt++) {
+      if (attachmentsAssigned) break;
 
-    const before = captureAttachmentState(files);
-    debugLog('ATTACHMENT_RENDER_BASELINE', before);
-
-    // Reliable attach menu opening: repeat up to 3 times
-    let menuItem = null;
-    let dumpLoggedAfterFirstClick = false;
-
-    for (let tryCount = 0; tryCount < 3; tryCount++) {
-      menuItem = findAttachMenuItem(kind);
-      if (menuItem?.el) break;
-
-      const attachButton = findAttachButton();
-      if (attachButton) {
-        debugLog('ATTACH_BUTTON_CLICK', {
-          tryCount,
-          aria: attachButton.getAttribute('aria-label'),
-          title: attachButton.getAttribute('title'),
-          testid: attachButton.getAttribute('data-testid'),
-          icon: attachButton.getAttribute('data-icon')
-        });
-        clickLikeUser(attachButton);
+      // Before attaching, run clearEditor on footer composer
+      const footerComposer = findComposer();
+      if (footerComposer) {
+        await clearEditor(footerComposer);
       }
 
-      const pollDeadline = Date.now() + 1500;
-      const firstClickTime = Date.now();
-      while (Date.now() < pollDeadline) {
+      const before = captureAttachmentState(files);
+      debugLog('ATTACHMENT_RENDER_BASELINE', { ...before, fullAttempt });
+
+      // Open attach menu (up to 3 tries)
+      let menuItem = null;
+      let dumpLoggedAfterFirstClick = false;
+
+      for (let tryCount = 0; tryCount < 3; tryCount++) {
         menuItem = findAttachMenuItem(kind);
         if (menuItem?.el) break;
 
-        if (tryCount === 0 && !dumpLoggedAfterFirstClick && Date.now() - firstClickTime >= 800) {
+        const attachButton = findAttachButton();
+        if (attachButton) {
+          debugLog('ATTACH_BUTTON_CLICK', {
+            tryCount,
+            fullAttempt,
+            aria: attachButton.getAttribute('aria-label'),
+            title: attachButton.getAttribute('title'),
+            testid: attachButton.getAttribute('data-testid'),
+            icon: attachButton.getAttribute('data-icon')
+          });
+          clickLikeUser(attachButton);
+        }
+
+        const pollDeadline = Date.now() + 1500;
+        const firstClickTime = Date.now();
+        while (Date.now() < pollDeadline) {
+          menuItem = findAttachMenuItem(kind);
+          if (menuItem?.el) break;
+
+          if (tryCount === 0 && !dumpLoggedAfterFirstClick && Date.now() - firstClickTime >= 800) {
+            dumpLoggedAfterFirstClick = true;
+            debugLog('ATTACH_UI_DUMP', captureAttachUiDump(attachButton));
+          }
+
+          await sleep(150);
+        }
+
+        if (menuItem?.el) break;
+
+        if (tryCount === 0 && !dumpLoggedAfterFirstClick) {
           dumpLoggedAfterFirstClick = true;
           debugLog('ATTACH_UI_DUMP', captureAttachUiDump(attachButton));
         }
 
-        await sleep(150);
+        debugLog('ATTACH_MENU_NOT_OPEN', { tryCount, fullAttempt, kind });
+        await sleep(400);
       }
 
-      if (menuItem?.el) break;
-
-      if (tryCount === 0 && !dumpLoggedAfterFirstClick) {
-        dumpLoggedAfterFirstClick = true;
-        debugLog('ATTACH_UI_DUMP', captureAttachUiDump(attachButton));
+      if (!menuItem?.el) {
+        debugLog('ATTACH_UI_DUMP', captureAttachUiDump(findAttachButton()));
       }
 
-      debugLog('ATTACH_MENU_NOT_OPEN', { tryCount, kind });
-      await sleep(400);
-    }
-
-    if (!menuItem?.el) {
-      debugLog('ATTACH_UI_DUMP', captureAttachUiDump(findAttachButton()));
-    }
-
-    let hookMessageListener = null;
-
-    try {
       if (menuItem?.el) {
-        const token = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `wa-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        let hookResolve = null;
-        const hookPromise = new Promise(resolve => { hookResolve = resolve; });
-
-        hookMessageListener = (e) => {
-          try {
-            const d = e.data;
-            if (e.source !== window || !d || d.source !== 'wa-sched-main' || d.token !== token) return;
-            if (d.type === 'ASSIGNED') {
-              debugLog('ATTACHMENT_HOOK_ASSIGNED', { count: d.count, accept: d.accept, multiple: d.multiple, connected: d.connected });
-              hookResolve({ success: true, ...d });
-            } else if (d.type === 'ERROR') {
-              debugLog('ATTACHMENT_HOOK_ERROR', { error: d.message });
-              hookResolve({ success: false, error: d.message });
-            }
-          } catch (_) {}
-        };
-
-        window.addEventListener('message', hookMessageListener);
-
-        // ARM immediately before clicking the menu item
-        window.postMessage({ source: 'wa-sched-content', type: 'ARM', token, files, ttl: 8000 }, '*');
-
         debugLog('ATTACH_MENU_ITEM_CLICK', {
           kind,
+          fullAttempt,
           text: menuItem.text,
           aria: menuItem.aria,
           testid: menuItem.testid,
@@ -1242,108 +1322,48 @@
           tag: menuItem.el.tagName
         });
         clickLikeUser(menuItem.el);
+        await sleep(200);
+      }
 
-        // Log snapshot of file inputs after menu item click
-        const fileInputsSnapshot = [...document.querySelectorAll('input[type="file"]')].map(inp => ({
+      // Poll up to 4s (150ms step) for connected file inputs
+      const inputDeadline = Date.now() + 4000;
+      let selected = null;
+      let lastSnapshot = [];
+      while (Date.now() < inputDeadline) {
+        const allInputs = [...document.querySelectorAll('input[type="file"]')].filter(inp => inp.isConnected);
+        lastSnapshot = allInputs.map(inp => ({
           accept: inp.accept,
           multiple: inp.multiple,
           connected: inp.isConnected,
-          el: inp
+          menuLabel: getMenuLabel(inp)
         }));
-        debugLog('ATTACHMENT_FILE_INPUTS_SNAPSHOT', {
-          inputs: fileInputsSnapshot.map(x => ({ accept: x.accept, multiple: x.multiple, connected: x.connected }))
-        });
-
-        // Wait up to 6s for hook ASSIGNED
-        const hookOutcome = await Promise.race([
-          hookPromise,
-          sleep(6000).then(() => ({ success: false, timeout: true }))
-        ]);
-
-        if (hookOutcome?.success) {
-          window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
-          await closeAttachMenuIfOpen();
-          await waitForAttachmentPreview(files, 15000);
-          return;
-        }
-
-        // If hook failed or timed out, DISARM
-        window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
-
-        // Check if snapshot shows an existing connected input with matching accept
-        const matchingSnapshotInput = fileInputsSnapshot.find(item => {
-          if (!item.connected || !item.el) return false;
-          const acc = String(item.accept || '').toLowerCase();
-          if (acc === '*' || acc === '*/*' || !acc) return true;
-          if (kind === 'media' && (acc.includes('image') || acc.includes('video'))) return true;
-          if (kind === 'document' && !isMediaOnlyInput(item.el)) return true;
-          return false;
-        });
-
-        if (matchingSnapshotInput?.el) {
-          debugLog('ATTACHMENT_SNAPSHOT_INPUT_FALLBACK', {
-            accept: matchingSnapshotInput.accept,
-            multiple: matchingSnapshotInput.multiple
-          });
-          assignFilesToInput(matchingSnapshotInput.el, files);
-          await closeAttachMenuIfOpen();
-          try {
-            await waitForAttachmentPreview(files, 15000);
-            return;
-          } catch (snapErr) {
-            debugLog('ATTACHMENT_SNAPSHOT_INPUT_PREVIEW_TIMEOUT', { error: snapErr?.message || String(snapErr) });
-          }
-        }
+        selected = selectFileInput(allInputs, files);
+        if (selected?.input) break;
+        await sleep(150);
       }
 
-      // Input polling flow
-      let input = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const inputDeadline = Date.now() + 5000;
-        while (Date.now() < inputDeadline) {
-          const allInputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !isStickerElement(el));
-          if (allInputs.length) {
-            if (kind === 'document') {
-              input = rankDocumentInput(allInputs);
-            }
-            if (!input) {
-              input = findFileInput(files, kind);
-            }
-            if (input) break;
-          }
-          await sleep(200);
-        }
+      debugLog('ATTACHMENT_FILE_INPUTS_SNAPSHOT', { inputs: lastSnapshot });
 
-        if (input) break;
-
-        if (attempt === 0 && menuItem?.el && visible(menuItem.el)) {
-          debugLog('ATTACH_MENU_ITEM_RETRY_CLICK', { kind });
-          clickLikeUser(menuItem.el);
-          await sleep(300);
-        }
-      }
-
-      if (input) {
+      if (selected?.input && !attachmentsAssigned) {
         debugLog('ATTACHMENT_INPUT_SELECTED', {
-          accept: input.accept,
-          multiple: input.multiple,
-          connected: input.isConnected,
-          visible: visible(input)
+          accept: selected.input.accept,
+          multiple: selected.input.multiple,
+          menuLabel: selected.menuLabel,
+          reason: selected.reason
         });
 
         try {
-          assignFilesToInput(input, files);
+          assignFilesToInput(selected.input, files);
+          attachmentsAssigned = true;
 
-          const assigned = [...(input.files || [])];
-          if (assigned.length === files.length) {
-            debugLog('ATTACHMENT_INPUT_ASSIGNED', {
-              count: assigned.length,
-              names: assigned.map(f => f.name),
-              sizes: assigned.map(f => f.size),
-              types: assigned.map(f => f.type),
-              accept: input.accept
-            });
-          }
+          const assigned = [...(selected.input.files || [])];
+          debugLog('ATTACHMENT_INPUT_ASSIGNED', {
+            count: assigned.length,
+            names: assigned.map(f => f.name),
+            sizes: assigned.map(f => f.size),
+            types: assigned.map(f => f.type),
+            accept: selected.input.accept
+          });
 
           await closeAttachMenuIfOpen();
           await waitForAttachmentPreview(files, 15000);
@@ -1354,32 +1374,37 @@
         }
       }
 
-      // Fallback: If input was unavailable, or assigning didn't activate the composer, use drag-and-drop
-      debugLog('ATTACHMENT_FALLBACK_DROP_ATTEMPT', { fileCount: files.length });
-      const dropSucceeded = await attachFilesViaDrop(files);
-      if (dropSucceeded) {
-        debugLog('ATTACHMENT_DROP_SUCCESS', { fileCount: files.length });
-        return;
+      // If no file input was found at all and nothing was assigned, try drop fallback
+      if (!attachmentsAssigned) {
+        debugLog('ATTACHMENT_FALLBACK_DROP_ATTEMPT', { fileCount: files.length, fullAttempt });
+        const dropSucceeded = await attachFilesViaDrop(files);
+        if (dropSucceeded) {
+          attachmentsAssigned = true;
+          debugLog('ATTACHMENT_DROP_SUCCESS', { fileCount: files.length });
+          return;
+        }
       }
 
-      const rejection = getAttachmentRejection();
-      if (rejection) {
-        debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
-        const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; e.stage = 'attach-files'; throw e;
+      // If preview did not show up and we have attempts left:
+      if (fullAttempt === 0) {
+        attachmentsAssigned = false;
+        await cleanupEditorAndDialogs();
+        await sleep(800);
+        await waitForNoPreview(5000);
+        debugLog('ATTACHMENT_RETRYING_FROM_TOP', { nextAttempt: 1 });
       }
-
-      const e = new Error('WhatsApp could not attach the scheduled file(s). Please ensure WhatsApp Web chat is fully loaded.');
-      e.noRetry = false;
-      e.stage = 'attach-files';
-      throw e;
-    } finally {
-      if (hookMessageListener) {
-        window.removeEventListener('message', hookMessageListener);
-      }
-      try {
-        window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
-      } catch (_) {}
     }
+
+    const rejection = getAttachmentRejection();
+    if (rejection) {
+      debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
+      const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; e.stage = 'attach-files'; throw e;
+    }
+
+    const e = new Error('WhatsApp could not attach the scheduled file(s). Please ensure WhatsApp Web chat is fully loaded.');
+    e.noRetry = false;
+    e.stage = 'attach-files';
+    throw e;
   }
 
   function getAttachmentRejection() {
@@ -1783,32 +1808,47 @@
         throw err;
       }
 
+      // CHANGE 4: verify the file count before pressing Send
+      const sendAria = clean(button.getAttribute('aria-label') || '');
+      const countMatch = sendAria.match(/send\s+(\d+)\s+selected/i);
+      if (countMatch) {
+        const n = parseInt(countMatch[1], 10);
+        const expectedCount = payload.attachments.length;
+        if (n !== expectedCount) {
+          debugLog('ATTACHMENT_COUNT_MISMATCH', { countInPreview: n, expectedCount, sendAria });
+          await cleanupEditorAndDialogs();
+          const err = new Error(`Preview has ${n} items, expected ${expectedCount}`);
+          err.stage = 'attach-files';
+          err.noRetry = false;
+          throw err;
+        }
+      }
+
       debugLog('ATTACHMENT_SEND_BUTTON_CLICK', {
         aria: button.getAttribute('aria-label'),
         title: button.getAttribute('title'),
         testid: button.getAttribute('data-testid')
       });
 
+      const sendButton = button;
       currentJobSendPressed = true;
-      button.click();
+      sendButton.click();
 
+      // CHANGE 5: element-based send confirmation (no false failures, no re-clicks)
       const deadline = Date.now() + 15000;
-      let attempts = 0;
-      let nextRetryTime = Date.now() + 3000;
+      let retryClicked = false;
+      const retryTime = Date.now() + 4000;
 
       while (Date.now() < deadline) {
         await sleep(200);
 
-        if (!isPreviewOpen()) {
-          debugLog('PREVIEW_CLOSED', { timeMs: Date.now() });
+        const closed = !document.contains(sendButton) || !visible(sendButton);
+        if (closed) {
+          debugLog('ATTACHMENT_SEND_CONFIRMED', { durationMs: Date.now() - (deadline - 15000) });
           const after = captureOutgoingState(expectedText, payload.attachments || []);
-          const rows = [...(document.querySelector('#main')?.querySelectorAll('[role="row"], [data-id]') || [])].filter(visible);
-          const lastRowText = rows.length ? clean(rows[rows.length - 1].innerText || '') : '';
-          const hasFileInLastRow = payload.attachments.some(a => lastRowText.includes(clean(a.name)));
-          debugLog('ATTACHMENT_SEND_SECONDARY_EVIDENCE', {
-            rowIncreased: after.rowCount > (beforeState?.rowCount || 0),
-            hasFileInLastRow,
-            lastRowSample: lastRowText.slice(0, 100)
+          debugLog('ATTACHMENT_SEND_ROW_DIAGNOSTICS', {
+            beforeRowCount: beforeState?.rowCount || 0,
+            afterRowCount: after.rowCount
           });
           return true;
         }
@@ -1821,28 +1861,22 @@
           throw e;
         }
 
-        if (Date.now() >= nextRetryTime && attempts < 2) {
-          attempts++;
-          nextRetryTime = Date.now() + 3000;
-          debugLog('ATTACHMENT_SEND_RETRY_CLICK', { attempt: attempts });
-          button = findAttachmentSendButton() || findSendButton();
-          if (button && visible(button) && isPreviewOpen()) {
-            button.click();
-          }
-          if (attempts === 2) {
-            const captionBox = findCaptionComposer();
-            if (captionBox) {
-              const enterInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
-              try { captionBox.dispatchEvent(new KeyboardEvent('keydown', enterInit)); } catch (_) {}
-              try { captionBox.dispatchEvent(new KeyboardEvent('keypress', enterInit)); } catch (_) {}
-              try { captionBox.dispatchEvent(new KeyboardEvent('keyup', enterInit)); } catch (_) {}
-            }
+        if (!retryClicked && Date.now() >= retryTime) {
+          if (document.contains(sendButton) && visible(sendButton)) {
+            retryClicked = true;
+            debugLog('ATTACHMENT_SEND_RETRY_CLICK', {
+              aria: sendButton.getAttribute('aria-label'),
+              connected: document.contains(sendButton),
+              visible: visible(sendButton)
+            });
+            sendButton.click();
           }
         }
       }
 
-      const stillOpen = isPreviewOpen();
-      const e = new Error(`WhatsApp attachment Send was clicked but attachment delivery was not confirmed (preview still open: ${stillOpen}).`);
+      const isConnected = document.contains(sendButton);
+      const isVis = visible(sendButton);
+      const e = new Error(`WhatsApp attachment Send was clicked but Send button is still present after 15s (connected: ${isConnected}, visible: ${isVis}).`);
       e.noRetry = true;
       e.stage = 'send-message';
       throw e;
@@ -1896,8 +1930,45 @@
         await clearEditor(caption);
       }
     } catch (_) {}
-    if (isPreviewOpen()) {
-      await closeAnyPreviewDialog();
+
+    const escInit = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true };
+    const deadline = Date.now() + 5000;
+
+    while (Date.now() < deadline) {
+      const remainingSend = [...document.querySelectorAll('button, [role="button"], [aria-label]')]
+        .filter(visible)
+        .filter(el => !el.closest('footer'))
+        .find(el => /^Send( \d+ selected)?$/i.test(clean(el.getAttribute('aria-label') || '')));
+
+      if (!remainingSend && !isPreviewOpen()) {
+        break;
+      }
+
+      try {
+        const closeBtns = [...document.querySelectorAll('button, [role="button"], [aria-label]')]
+          .filter(visible)
+          .filter(el => !el.closest('footer'))
+          .filter(el => {
+            const meta = clean(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-testid') || ''} ${el.getAttribute('data-icon') || ''}`).toLowerCase();
+            return /close|back|cancel|dismiss|x\b/.test(meta) && !isCallControl(el);
+          });
+        for (const btn of closeBtns) {
+          try { btn.click(); } catch (_) {}
+        }
+      } catch (_) {}
+
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown', escInit));
+        document.dispatchEvent(new KeyboardEvent('keyup', escInit));
+      } catch (_) {}
+
+      await sleep(500);
+
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown', escInit));
+        document.dispatchEvent(new KeyboardEvent('keyup', escInit));
+      } catch (_) {}
+
       await sleep(200);
     }
   }
@@ -1924,6 +1995,7 @@
     try {
       currentJobSendPressed = false;
       currentJobDropAttempted = false;
+      attachmentsAssigned = false;
       await sleep(350);
       await run('open-contact', () => openContact(payload.contact));
 
