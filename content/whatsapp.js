@@ -1,8 +1,10 @@
 (() => {
-  const EXTENSION_VERSION = '1.4.34';
+  const EXTENSION_VERSION = '1.4.37';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let activeSend = false;
   let sendQueue = Promise.resolve();
+  let currentJobSendPressed = false;
+  let currentJobDropAttempted = false;
 
   function visible(el) {
     if (!el) return false;
@@ -162,167 +164,107 @@
   }
 
 
-  function clearEditorContents(el) {
-    el.focus();
-    try {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-      document.execCommand('delete', false);
-    } catch (_) {}
-    try {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.deleteContents();
-      range.collapse(true);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    } catch (_) {}
-  }
+  const norm = s => String(s ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  function dispatchEditorInput(el, inputType = 'insertText', data = null) {
-    try {
-      el.dispatchEvent(new InputEvent('input', {
-        bubbles: true, composed: true, inputType, data
-      }));
-    } catch (_) {
-      try { el.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
+  const readEditor = el =>
+    (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)
+      ? el.value
+      : (el.innerText || el.textContent || '');
+
+  async function waitUntil(fn, timeout = 2000, step = 50) {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      try { const v = fn(); if (v) return v; } catch (_) {}
+      await sleep(step);
     }
+    return null;
   }
 
-  function hardClearContentEditable(el) {
-    if (!el) return false;
+  function selectAllIn(el) {
     el.focus();
-    for (let pass = 0; pass < 3 && getComposerText(el) !== ''; pass++) {
-      try { document.execCommand('selectAll', false); document.execCommand('delete', false); } catch (_) {}
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  async function clearEditor(el) {
+    if (!el) return true;
+    for (let i = 0; i < 4; i++) {
+      if (!norm(readEditor(el))) return true;
+      selectAllIn(el);
+      try { document.execCommand('delete', false); } catch (_) {}
+      if (await waitUntil(() => !norm(readEditor(el)), 800)) return true;
       try {
-        const sel = window.getSelection(); const range = document.createRange();
-        range.selectNodeContents(el); sel?.removeAllRanges(); sel?.addRange(range);
-        document.execCommand('delete', false);
+        el.dispatchEvent(new InputEvent('beforeinput', {
+          inputType: 'deleteContentBackward', bubbles: true, cancelable: true, composed: true }));
       } catch (_) {}
-      if (getComposerText(el) !== '') {
-        try {
-          const sel = window.getSelection(); const range = document.createRange();
-          range.selectNodeContents(el); range.deleteContents(); sel?.removeAllRanges(); sel?.addRange(range);
-          dispatchEditorInput(el, 'deleteContentBackward', null);
-        } catch (_) {}
-      }
+      if (await waitUntil(() => !norm(readEditor(el)), 600)) return true;
     }
-    try {
-      const sel = window.getSelection(); const range = document.createRange();
-      range.selectNodeContents(el); range.collapse(true); sel?.removeAllRanges(); sel?.addRange(range);
-    } catch (_) {}
-    return getComposerText(el) === '';
+    return !norm(readEditor(el));
   }
 
-  function insertExactText(el, value) {
-    if (!value) return;
+  function pasteText(el, text) {
     el.focus();
-    if (!value.includes('\n')) {
-      try { document.execCommand('insertText', false, value); }
-      catch (_) { el.appendChild(document.createTextNode(value)); dispatchEditorInput(el, 'insertText', value); }
-      return;
-    }
-    const lines=value.split('\n');
-    for (let i=0;i<lines.length;i++) {
-      if (lines[i]) { try { document.execCommand('insertText', false, lines[i]); } catch (_) { el.appendChild(document.createTextNode(lines[i])); } }
-      if (i<lines.length-1) {
-        let inserted=false; try { inserted=document.execCommand('insertLineBreak', false); } catch (_) {}
-        if (!inserted) { try { inserted=document.execCommand('insertParagraph', false); } catch (_) {} }
-        if (!inserted) el.appendChild(document.createElement('br'));
-      }
-    }
-    dispatchEditorInput(el, 'insertText', value);
+    const dt = new DataTransfer();
+    dt.setData('text/plain', text);
+    el.dispatchEvent(new ClipboardEvent('paste',
+      { clipboardData: dt, bubbles: true, cancelable: true, composed: true }));
   }
 
-  function selectAllEditorContents(el) {
-    if (!el || !document.contains(el)) return false;
-    try {
-      el.focus();
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-
-      // Do NOT compare Selection.toString() with our logical editor text.
-      // WhatsApp's contenteditable frequently represents visual line breaks as
-      // BR/div nodes, while Selection.toString() serializes those nodes
-      // differently. That comparison caused valid selections to be rejected
-      // and, consequently, the scheduler never reached the actual paste.
-      if (!sel || sel.rangeCount !== 1) return false;
-      const activeRange = sel.getRangeAt(0);
-      const container = activeRange.commonAncestorContainer;
-      const node = container.nodeType === Node.TEXT_NODE ? container.parentNode : container;
-      return node === el || el.contains(node);
-    } catch (_) { return false; }
-  }
-
-  function pasteLikeExactText(el, value) {
-    if (!el || !document.contains(el)) return false;
+  function execInsert(el, text) {
     el.focus();
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      if (line) document.execCommand('insertText', false, line);
+      if (i < lines.length - 1) document.execCommand('insertLineBreak', false);
+    });
+  }
 
-    // IMPORTANT: execCommand('insertText') already generates the browser input
-    // event. Do NOT dispatch a second synthetic input event here. WhatsApp's
-    // React editor can process that second event as another insertion, which
-    // was the reason an 877-character message became 2,632 characters.
-    if (!selectAllEditorContents(el)) return false;
-    try {
-      const ok = document.execCommand('insertText', false, value);
+  async function setEditorText(el, rawText) {
+    const text = String(rawText ?? '').replace(/\r\n?/g, '\n').trim();
+    const expected = norm(text);
+    if (!expected) return true;
+    const strategies = [
+      ['paste',       () => { selectAllIn(el); pasteText(el, text); }],
+      ['execCommand', () => { selectAllIn(el); execInsert(el, text); }]
+    ];
+    for (const [name, run] of strategies) {
+      if (!document.contains(el)) return false;
+      if (!(await clearEditor(el))) { debugLog('EDITOR_CLEAR_FAILED', { name }); continue; }
+      run();
+      const ok = await waitUntil(() => norm(readEditor(el)) === expected, 2500);
       if (ok) {
-        if (editorTextMatches(getComposerText(el), value)) return true;
-        awaitMicrotask();
+        await sleep(250); // stability window catches late duplicate inserts
+        if (norm(readEditor(el)) === expected) { debugLog('EDITOR_SET_OK', { name }); return true; }
       }
-    } catch (_) {}
-
-    // Fallback for builds where execCommand refuses multiline text. First make
-    // the editor empty using one native delete operation, then write the DOM
-    // once and emit exactly one input event so React sees the replacement.
-    if (!selectAllEditorContents(el)) return false;
-    let deleted = false;
-    try { deleted = document.execCommand('delete', false); } catch (_) {}
-    if (!deleted || getComposerText(el) !== '') {
-      try { el.replaceChildren(); } catch (_) { try { el.textContent = ''; } catch (_) {} }
-      dispatchEditorInput(el, 'deleteContentBackward', null);
+      debugLog('EDITOR_SET_MISMATCH', { name, expectedLen: expected.length,
+                                        actualLen: norm(readEditor(el)).length });
     }
-    if (getComposerText(el) !== '') return false;
-
-    const lines = exactText(value).split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i]) el.appendChild(document.createTextNode(lines[i]));
-      if (i < lines.length - 1) el.appendChild(document.createElement('br'));
-    }
-    dispatchEditorInput(el, 'insertText', value);
-    return editorTextMatches(getComposerText(el), value);
+    await clearEditor(el);
+    return false;
   }
 
-  function awaitMicrotask() {
-    // Synchronous helper used only to yield through the browser event queue
-    // without adding another editor mutation.
-    return true;
+  function editorTextMatches(actual, expected) {
+    return norm(actual) === norm(expected);
   }
 
-  function replaceEditorContentsAtomically(el, value) {
-    if (!el) return false;
-    el.focus();
-    // The old strategy required WhatsApp's React editor to acknowledge a
-    // synthetic DELETE before we inserted the new message. On some current
-    // builds React immediately restores the old DOM value, causing the
-    // scheduler to fail with "could not be cleared safely". Replacing the
-    // current selection in one edit avoids that race entirely.
-    return pasteLikeExactText(el, value);
+  function getComposerText(el) {
+    return readEditor(el);
   }
 
   async function clearAndType(el, text) {
     if (!el) throw new Error('Input element not found.');
-    const value = exactText(text);
 
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      const value = String(text ?? '');
       if (setter) setter.call(el, ''); else el.value = '';
       el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
       if (setter) setter.call(el, value); else el.value = value;
@@ -332,87 +274,20 @@
       return el;
     }
 
-    let current = el;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (!document.contains(current)) break;
-
-      if (replaceEditorContentsAtomically(current, value)) {
-        await sleep(100);
-        if (editorTextMatches(getComposerText(current), value)) return current;
-      }
-
-      try {
-        if (hardClearContentEditable(current)) {
-          insertExactText(current, value);
-          dispatchEditorInput(current, 'insertText', value);
-          await sleep(100);
-          if (editorTextMatches(getComposerText(current), value)) return current;
-        }
-      } catch (_) {}
-      await sleep(150);
+    const success = await setEditorText(el, text);
+    if (!success) {
+      const actual = readEditor(el);
+      debugLog('MESSAGE_TYPED_FAILED', { expected: text, actual, expectedNorm: norm(text), actualNorm: norm(actual) });
+      const e = new Error('WhatsApp editor did not accept the exact scheduled text.');
+      e.noRetry = false;
+      throw e;
     }
-
-    const actual = getComposerText(current);
-    if (editorTextMatches(actual, value)) return current;
-
-    debugLog('MESSAGE_TYPED_FAILED', { expected: value, actual, expectedLength: value.length, actualLength: actual.length });
-    const e = new Error('WhatsApp editor did not accept the exact scheduled text.');
-    e.noRetry = false;
-    throw e;
-  }
-
-  function extractEditorText(el) {
-    if (!el) return '';
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return exactText(el.value || '');
-    // WhatsApp's contenteditable has changed its internal div/br structure many
-    // times. innerText is the browser's logical rendered-text representation and
-    // is substantially safer than recursively adding a newline for every DIV.
-    // The old recursive walker counted nested structural DIVs repeatedly and
-    // produced 22k/44k characters from an 877-character message.
-    let value = '';
-    try { value = exactText(el.innerText || ''); } catch (_) {}
-    if (!value) {
-      try { value = exactText(el.textContent || ''); } catch (_) {}
-    }
-    return value.replace(/\n+$/g, '');
-  }
-
-  function getComposerText(el) {
-    return extractEditorText(el);
-  }
-
-  function editorTextMatches(actual, expected) {
-    const a = exactText(actual).replace(/\n+$/g, '');
-    const e = exactText(expected).replace(/\n+$/g, '');
-    return a === e;
-  }
-
-  function writeComposerDom(el, value) {
-    if (!el || !document.contains(el)) return false;
-    try {
-      el.focus();
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    } catch (_) {}
-
-    // Replace the DOM in one operation. This is a fallback for WhatsApp builds
-    // where execCommand/React selection handling appends instead of replacing.
-    try { el.replaceChildren(); } catch (_) { try { el.textContent = ''; } catch (_) {} }
-    const lines = exactText(value).split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i]) el.appendChild(document.createTextNode(lines[i]));
-      if (i < lines.length - 1) el.appendChild(document.createElement('br'));
-    }
-    dispatchEditorInput(el, 'insertText', value);
-    return editorTextMatches(getComposerText(el), value);
+    return el;
   }
 
   async function typeIntoVerifiedEditor(findEditor, text, label = 'message') {
-    const expected = exactText(text);
-    if (!expected) return findEditor();
+    const trimmed = String(text ?? '').replace(/\r\n?/g, '\n').trim();
+    if (!trimmed) return findEditor();
     let editor = findEditor();
     const deadline = Date.now() + 15000;
     while (!editor && Date.now() < deadline) { await sleep(250); editor = findEditor(); }
@@ -423,9 +298,10 @@
       dataTab: editor.getAttribute('data-tab'), inDialog: !!editor.closest('[role="dialog"]'), inFooter: !!editor.closest('footer')
     });
 
-    const typed = await clearAndType(editor, expected);
-    const actual = getComposerText(typed);
-    debugLog('MESSAGE_TYPED', { expected, actual, matches: editorTextMatches(actual, expected) });
+    await clearEditor(editor);
+    const typed = await clearAndType(editor, trimmed);
+    const actual = readEditor(typed);
+    debugLog('MESSAGE_TYPED', { expected: trimmed, actual, matches: editorTextMatches(actual, trimmed) });
     return typed;
   }
 
@@ -532,17 +408,13 @@
 
     try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (_) {}
 
-    const interactiveTargets = [
-      target.querySelector?.('[role="button"]'),
-      target.querySelector?.('[data-testid*="cell-frame"]'),
-      target.querySelector?.('span[title]'),
-      target.querySelector?.('div[tabindex]'),
-      target
-    ].filter(Boolean);
+    const interactive = target.querySelector?.('[role="button"]') ||
+                        target.querySelector?.('[data-testid*="cell-frame"]') ||
+                        target.querySelector?.('span[title]') ||
+                        target.querySelector?.('div[tabindex]') ||
+                        target;
 
-    for (const el of interactiveTargets) {
-      clickLikeUser(el);
-    }
+    clickLikeUser(interactive);
     return true;
   }
 
@@ -728,17 +600,6 @@
     throw new Error('Message composer not found after 15 seconds.');
   }
 
-  async function typeMessage(text) {
-    if (!text) return;
-    const composer = await waitForComposer();
-    await clearAndType(composer, text);
-    await sleep(500);
-    const actual = getComposerText(composer);
-    debugLog('MESSAGE_TYPED', { expected: exactText(text), actual, matches: editorTextMatches(actual, exactText(text)) });
-    if (!editorTextMatches(actual, exactText(text))) {
-      throw new Error('WhatsApp composer did not accept the message text.');
-    }
-  }
 
   function isCallControl(el) {
     const label = clean([
@@ -1081,61 +942,140 @@
   }
 
   async function attachFilesViaDrop(files) {
-    const main = document.querySelector('#main');
-    const footer = main?.querySelector('footer');
-    const app = document.querySelector('#app');
-    const targets = [
-      document.querySelector('[data-testid="conversation-panel-messages"]'),
-      document.querySelector('#main .copyable-area'),
-      footer,
-      main,
-      app,
-      document.body
-    ].filter(Boolean).filter(visible);
-    if (!targets.length) return false;
+    if (isPreviewOpen()) return true;
+    if (currentJobDropAttempted) return false;
+    currentJobDropAttempted = true;
 
-    const before = captureAttachmentState(files);
-    debugLog('ATTACHMENT_DROP_BASELINE', before);
+    const main = document.querySelector('#main');
+    const target = document.querySelector('#main [data-testid="conversation-panel-messages"]') ||
+                   document.querySelector('#main .copyable-area') ||
+                   main;
+    if (!target || !visible(target)) return false;
 
     const transfer = new DataTransfer();
     for (const file of files) transfer.items.add(file);
     try { transfer.effectAllowed = 'copy'; } catch (_) {}
     try { transfer.dropEffect = 'copy'; } catch (_) {}
 
-    for (const target of targets) {
-      const rect = target.getBoundingClientRect();
-      const init = {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        dataTransfer: transfer,
-        clientX: Math.round(rect.left + Math.max(1, rect.width / 2)),
-        clientY: Math.round(rect.top + Math.max(1, rect.height / 2)),
-        screenX: window.screenX + Math.round(rect.left + Math.max(1, rect.width / 2)),
-        screenY: window.screenY + Math.round(rect.top + Math.max(1, rect.height / 2))
-      };
-      try { target.dispatchEvent(new DragEvent('dragenter', init)); } catch (_) {}
-      try { target.dispatchEvent(new DragEvent('dragover', init)); } catch (_) {}
-      try { target.dispatchEvent(new DragEvent('drop', init)); } catch (_) {}
-      debugLog('ATTACHMENT_DROP_DISPATCHED', {tag: target.tagName, className: String(target.className || '').slice(0,120)});
-    }
+    const rect = target.getBoundingClientRect();
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      dataTransfer: transfer,
+      clientX: Math.round(rect.left + Math.max(1, rect.width / 2)),
+      clientY: Math.round(rect.top + Math.max(1, rect.height / 2)),
+      screenX: window.screenX + Math.round(rect.left + Math.max(1, rect.width / 2)),
+      screenY: window.screenY + Math.round(rect.top + Math.max(1, rect.height / 2))
+    };
+    try { target.dispatchEvent(new DragEvent('dragenter', init)); } catch (_) {}
+    try { target.dispatchEvent(new DragEvent('dragover', init)); } catch (_) {}
+    try { target.dispatchEvent(new DragEvent('drop', init)); } catch (_) {}
+    debugLog('ATTACHMENT_DROP_DISPATCHED', { tag: target.tagName, className: String(target.className || '').slice(0, 120) });
 
-    const deadline = Date.now() + 6000;
+    try {
+      await waitForAttachmentPreview(files, 15000);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function findPreviewContainer() {
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [data-animate-modal-popup], [data-testid*="popup" i], [data-testid*="drawer" i]')].filter(visible);
+    if (dialogs.length) return dialogs[0];
+
+    const caption = findCaptionComposer();
+    if (caption) {
+      const nonFooterAncestor = caption.closest('div[tabindex="-1"], section, [role="region"], #main') || caption.parentElement;
+      if (nonFooterAncestor && !nonFooterAncestor.closest('footer')) return nonFooterAncestor;
+    }
+    return null;
+  }
+
+  function isPreviewOpen() {
+    const container = findPreviewContainer();
+    if (container && visible(container)) return true;
+    const caption = findCaptionComposer();
+    if (caption && visible(caption) && !caption.closest('footer')) return true;
+    return false;
+  }
+
+  async function closeAttachMenuIfOpen() {
+    try {
+      const menus = [...document.querySelectorAll('[role="menu"], [role="listbox"], [data-animate-dropdown-item], [data-testid*="menu" i], [data-testid*="dropdown" i]')].filter(visible);
+      if (menus.length) {
+        const escInit = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true };
+        document.dispatchEvent(new KeyboardEvent('keydown', escInit));
+        await sleep(150);
+      }
+    } catch (_) {}
+  }
+
+  async function closeAnyPreviewDialog() {
+    try {
+      const dialog = findPreviewContainer();
+      if (dialog) {
+        const closeBtn = [...dialog.querySelectorAll('button, [role="button"]')]
+          .filter(visible)
+          .find(el => {
+            const meta = clean(`${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.getAttribute('data-testid') || ''} ${el.getAttribute('data-icon') || ''}`).toLowerCase();
+            return /close|back|cancel|dismiss|x\b/.test(meta) && !isCallControl(el);
+          });
+        if (closeBtn) {
+          clickLikeUser(closeBtn);
+          await sleep(200);
+        }
+      }
+    } catch (_) {}
+    try {
+      const escInit = { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true, composed: true };
+      document.dispatchEvent(new KeyboardEvent('keydown', escInit));
+      document.dispatchEvent(new KeyboardEvent('keyup', escInit));
+    } catch (_) {}
+  }
+
+  async function waitForAttachmentPreview(files, timeout = 15000) {
+    const isMedia = areAllMediaFiles(files);
+    const deadline = Date.now() + timeout;
+
     while (Date.now() < deadline) {
-      await sleep(250);
       const rejection = getAttachmentRejection();
       if (rejection) {
-        debugLog('ATTACHMENT_DROP_REJECTED', {message: rejection});
-        return false;
+        const e = new Error(`WhatsApp rejected the attachment: ${rejection}`);
+        e.noRetry = true;
+        e.stage = 'attach-files';
+        throw e;
       }
-      const pending = captureAttachmentComposerState();
-      const state = captureAttachmentState(files);
-      if (pending.sendVisible || findAttachmentSendButton() || attachmentStateChanged(before, state)) {
-        debugLog('ATTACHMENT_DROP_PREVIEW_READY', {before, state, pending});
+
+      const container = findPreviewContainer();
+      const caption = findCaptionComposer();
+      const nonFooterSend = [...(container || document).querySelectorAll('button, [role="button"], [aria-label]')]
+        .filter(visible)
+        .filter(el => !el.closest('footer'))
+        .find(el => /^Send/i.test(clean(el.getAttribute('aria-label') || '')));
+
+      const hasSendOrCaption = !!caption || !!nonFooterSend;
+
+      if (hasSendOrCaption) {
+        debugLog('ATTACHMENT_PREVIEW_READY', {
+          isMedia,
+          hasCaption: !!caption,
+          hasSend: !!nonFooterSend,
+          matchedSendAria: nonFooterSend ? clean(nonFooterSend.getAttribute('aria-label')) : null,
+          containerFound: !!container
+        });
+        await sleep(400);
         return true;
       }
+
+      await sleep(200);
     }
-    return false;
+
+    const err = new Error('WhatsApp attachment preview was not ready within 15 seconds.');
+    err.noRetry = false;
+    err.stage = 'attach-files';
+    throw err;
   }
 
   async function attachFiles(attachments) {
@@ -1161,138 +1101,176 @@
     const kind = attachmentKind(files);
     const isMedia = kind === 'media';
 
+    // Before attaching, run clearEditor on footer composer so the footer Send button is not visible because of leftover text
+    const footerComposer = findComposer();
+    if (footerComposer) {
+      await clearEditor(footerComposer);
+    }
+
     const before = captureAttachmentState(files);
     debugLog('ATTACHMENT_RENDER_BASELINE', before);
 
-    const attachButton = findAttachButton();
-    let menuOpened = false;
-    if (attachButton) {
-      debugLog('ATTACH_BUTTON_CLICK', {
-        aria: attachButton.getAttribute('aria-label'),
-        title: attachButton.getAttribute('title'),
-        testid: attachButton.getAttribute('data-testid'),
-        icon: attachButton.getAttribute('data-icon')
-      });
-      clickLikeUser(attachButton);
-      menuOpened = true;
-      await sleep(500);
-    }
+    const token = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : `wa-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let hookResolve = null;
+    const hookPromise = new Promise(resolve => { hookResolve = resolve; });
 
-    let menuItem = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      menuItem = findAttachMenuItem(kind);
-      if (menuItem) break;
-      await sleep(200);
-    }
+    const onWindowMessage = (e) => {
+      try {
+        const d = e.data;
+        if (e.source !== window || !d || d.source !== 'wa-sched-main' || d.token !== token) return;
+        if (d.type === 'ASSIGNED') {
+          debugLog('ATTACHMENT_HOOK_ASSIGNED', { count: d.count, accept: d.accept, multiple: d.multiple, connected: d.connected });
+          hookResolve({ success: true, ...d });
+        } else if (d.type === 'ERROR') {
+          debugLog('ATTACHMENT_HOOK_ERROR', { error: d.message });
+          hookResolve({ success: false, error: d.message });
+        }
+      } catch (_) {}
+    };
 
-    let input = menuItem?.input || null;
+    window.addEventListener('message', onWindowMessage);
 
-    if (!input && menuItem?.el) {
-      debugLog('ATTACH_MENU_ITEM_CLICK', {
-        kind,
-        tag: menuItem.el.tagName,
-        text: menuItem.text,
-        aria: menuItem.aria
-      });
-      clickLikeUser(menuItem.el);
-      await sleep(400);
-      input = menuItem.el.querySelector?.('input[type="file"]') || menuItem.el.parentElement?.querySelector?.('input[type="file"]');
-    }
+    try {
+      window.postMessage({ source: 'wa-sched-content', type: 'ARM', token, files, ttl: 15000 }, '*');
 
-    if (!input) {
-      input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
-    }
-
-    if (!input && menuOpened) {
-      for (let attempt = 0; attempt < 6; attempt++) {
+      const attachButton = findAttachButton();
+      if (attachButton) {
+        debugLog('ATTACH_BUTTON_CLICK', {
+          aria: attachButton.getAttribute('aria-label'),
+          title: attachButton.getAttribute('title'),
+          testid: attachButton.getAttribute('data-testid'),
+          icon: attachButton.getAttribute('data-icon')
+        });
+        clickLikeUser(attachButton);
         await sleep(300);
-        menuItem = menuItem || findAttachMenuItem(kind);
-        if (menuItem?.el && !input) {
+      }
+
+      let menuItem = null;
+      const menuDeadline = Date.now() + 3000;
+      while (Date.now() < menuDeadline) {
+        menuItem = findAttachMenuItem(kind);
+        if (menuItem?.el) break;
+        await sleep(200);
+      }
+
+      if (menuItem?.el) {
+        debugLog('ATTACH_MENU_ITEM_CLICK', {
+          kind,
+          text: menuItem.text,
+          aria: menuItem.aria,
+          testid: menuItem.testid,
+          icon: menuItem.icon,
+          tag: menuItem.el.tagName
+        });
+        clickLikeUser(menuItem.el);
+        await sleep(300);
+      }
+
+      // Log snapshot of file inputs after menu item click
+      const fileInputsSnapshot = [...document.querySelectorAll('input[type="file"]')].map(inp => ({
+        accept: inp.accept,
+        multiple: inp.multiple,
+        connected: inp.isConnected
+      }));
+      debugLog('ATTACHMENT_FILE_INPUTS_SNAPSHOT', { inputs: fileInputsSnapshot });
+
+      // Wait up to 6s for hook ASSIGNED
+      const hookOutcome = await Promise.race([
+        hookPromise,
+        sleep(6000).then(() => ({ success: false, timeout: true }))
+      ]);
+
+      if (hookOutcome?.success) {
+        window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
+        await closeAttachMenuIfOpen();
+        await waitForAttachmentPreview(files, 15000);
+        return;
+      }
+
+      // If hook failed or timed out, DISARM and fall back to DOM input polling
+      window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
+
+      let input = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const inputDeadline = Date.now() + 5000;
+        while (Date.now() < inputDeadline) {
+          const allInputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !isStickerElement(el));
+          if (allInputs.length) {
+            if (kind === 'document') {
+              input = rankDocumentInput(allInputs);
+            }
+            if (!input) {
+              input = findFileInput(files, kind);
+            }
+            if (input) break;
+          }
+          await sleep(200);
+        }
+
+        if (input) break;
+
+        if (attempt === 0 && menuItem?.el && visible(menuItem.el)) {
+          debugLog('ATTACH_MENU_ITEM_RETRY_CLICK', { kind });
           clickLikeUser(menuItem.el);
           await sleep(300);
         }
-        input = findFileInput(files, kind) || (isMedia ? document.querySelector('input[type="file"]') : rankDocumentInput([...document.querySelectorAll('input[type="file"]')]));
-        if (input) break;
       }
-    }
 
-    // Strictly ensure non-media documents are not fed into media-only inputs
-    if (!isMedia && input && isMediaOnlyInput(input)) {
-      debugLog('ATTACHMENT_MEDIA_INPUT_REJECTED_FOR_DOCUMENT', { accept: input.accept });
-      input = rankDocumentInput([...document.querySelectorAll('input[type="file"]')]);
-    }
+      if (input) {
+        debugLog('ATTACHMENT_INPUT_SELECTED', {
+          accept: input.accept,
+          multiple: input.multiple,
+          connected: input.isConnected,
+          visible: visible(input)
+        });
 
-    if (input) {
-      debugLog('ATTACHMENT_INPUT_SELECTED', {
-        accept: input.accept,
-        multiple: input.multiple,
-        connected: input.isConnected,
-        visible: visible(input)
-      });
+        try {
+          assignFilesToInput(input, files);
 
+          const assigned = [...(input.files || [])];
+          if (assigned.length === files.length) {
+            debugLog('ATTACHMENT_INPUT_ASSIGNED', {
+              count: assigned.length,
+              names: assigned.map(f => f.name),
+              sizes: assigned.map(f => f.size),
+              types: assigned.map(f => f.type),
+              accept: input.accept
+            });
+          }
+
+          await closeAttachMenuIfOpen();
+          await waitForAttachmentPreview(files, 15000);
+          return;
+        } catch (inputErr) {
+          debugLog('ATTACHMENT_INPUT_ERROR', { error: inputErr?.message || String(inputErr) });
+          if (inputErr?.stage === 'attach-files' && inputErr?.noRetry) throw inputErr;
+        }
+      }
+
+      // Fallback: If input was unavailable, or assigning didn't activate the composer, use drag-and-drop
+      debugLog('ATTACHMENT_FALLBACK_DROP_ATTEMPT', { fileCount: files.length });
+      const dropSucceeded = await attachFilesViaDrop(files);
+      if (dropSucceeded) {
+        debugLog('ATTACHMENT_DROP_SUCCESS', { fileCount: files.length });
+        return;
+      }
+
+      const rejection = getAttachmentRejection();
+      if (rejection) {
+        debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
+        const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; e.stage = 'attach-files'; throw e;
+      }
+
+      const e = new Error('WhatsApp could not attach the scheduled file(s). Please ensure WhatsApp Web chat is fully loaded.');
+      e.noRetry = false;
+      e.stage = 'attach-files';
+      throw e;
+    } finally {
+      window.removeEventListener('message', onWindowMessage);
       try {
-        assignFilesToInput(input, files);
-
-        const assigned = [...(input.files || [])];
-        if (assigned.length === files.length) {
-          debugLog('ATTACHMENT_INPUT_ASSIGNED', {
-            count: assigned.length,
-            names: assigned.map(f => f.name),
-            sizes: assigned.map(f => f.size),
-            types: assigned.map(f => f.type),
-            accept: input.accept
-          });
-        }
-
-        const deadline = Date.now() + 8000;
-        let rejected = false;
-        while (Date.now() < deadline) {
-          const rejection = getAttachmentRejection();
-          if (rejection) {
-            debugLog('ATTACHMENT_REJECTED_ON_INPUT', { message: rejection, names: files.map(f => f.name) });
-            rejected = true;
-            try { input.value = ''; } catch (_) {}
-            break;
-          }
-          const pending = captureAttachmentComposerState();
-          const selectedCount = [...document.querySelectorAll('input[type="file"]')]
-            .reduce((n, el) => n + (el.files?.length || 0), 0);
-          const state = captureAttachmentState(files);
-          const hasSendBtn = !!findAttachmentSendButton() || !!findSendButton();
-          if ((selectedCount >= files.length || pending.sendVisible || hasSendBtn || attachmentStateChanged(before, state)) && (pending.sendVisible || hasSendBtn)) {
-            debugLog('ATTACHMENT_PREVIEW_READY', { kind, before, pending, selectedCount, hasSendBtn });
-            return;
-          }
-          await sleep(250);
-        }
-
-        if (!rejected) {
-          const pending = captureAttachmentComposerState();
-          if (pending.sendVisible || findAttachmentSendButton() || findSendButton()) {
-            debugLog('ATTACHMENT_PREVIEW_READY_AFTER_WAIT', { kind, before, pending });
-            return;
-          }
-        }
-      } catch (inputErr) {
-        debugLog('ATTACHMENT_INPUT_ERROR', { error: inputErr?.message || String(inputErr) });
-      }
+        window.postMessage({ source: 'wa-sched-content', type: 'DISARM' }, '*');
+      } catch (_) {}
     }
-
-    // Fallback: If input was unavailable, or assigning didn't activate the composer, use drag-and-drop
-    debugLog('ATTACHMENT_FALLBACK_DROP_ATTEMPT', { fileCount: files.length });
-    const dropSucceeded = await attachFilesViaDrop(files);
-    if (dropSucceeded) {
-      debugLog('ATTACHMENT_DROP_SUCCESS', { fileCount: files.length });
-      return;
-    }
-
-    const rejection = getAttachmentRejection();
-    if (rejection) {
-      debugLog('ATTACHMENT_REJECTED_BY_WHATSAPP', { message: rejection, names: files.map(f => f.name) });
-      const e = new Error(`WhatsApp rejected the attachment: ${rejection}`); e.noRetry = true; throw e;
-    }
-
-    throw new Error('WhatsApp could not attach the scheduled file(s). Please ensure WhatsApp Web chat is fully loaded.');
   }
 
   function getAttachmentRejection() {
@@ -1550,16 +1528,20 @@
     return count;
   }
 
+
   function captureOutgoingState(text = '', attachments = []) {
     const main = document.querySelector('#main');
-    if (!main) return { textHits: 0, textOccurrences: 0, filenameHits: 0, filenameOccurrences: 0, mediaHits: 0, documentHits: 0, outgoingNodes: 0, mainTextLength: 0 };
-    const expected = exactText(text);
+    if (!main) return { textHits: 0, textOccurrences: 0, filenameHits: 0, filenameOccurrences: 0, mediaHits: 0, documentHits: 0, outgoingNodes: 0, rowCount: 0, mainTextLength: 0 };
+    const expected = norm(text);
     const names = attachments.map(a => clean(a.name)).filter(Boolean);
 
     // Query outgoing messages strictly within #main, excluding open dialogs/drawers/footers
-    const outgoing = [...main.querySelectorAll('.message-out, [data-pre-plain-text], [data-id*="true_"], [data-id*="out_"]')]
+    const outgoing = [...main.querySelectorAll('.message-out, [data-pre-plain-text], [data-id*="true_"], [data-id*="out_"], [role="row"], [data-id]')]
       .filter(visible)
       .filter(el => !el.closest('[role="dialog"], [data-animate-modal-popup], [data-testid*="drawer"], footer'));
+
+    const rows = [...main.querySelectorAll('[role="row"], [data-id]')].filter(visible).filter(el => !el.closest('footer'));
+    const rowCount = rows.length;
 
     let textHits = 0;
     let textOccurrences = 0;
@@ -1569,7 +1551,7 @@
     let documentHits = 0;
 
     for (const node of outgoing) {
-      const value = exactText(node.innerText || node.textContent || '');
+      const value = norm(node.innerText || node.textContent || '');
       if (expected && value === expected) textHits++;
       if (expected && value.includes(expected)) {
         let at = 0;
@@ -1592,7 +1574,7 @@
 
     return {
       textHits, textOccurrences, filenameHits, filenameOccurrences, mediaHits, documentHits,
-      outgoingNodes: outgoing.length, mainTextLength: String(main.innerText || '').length
+      outgoingNodes: outgoing.length, rowCount, mainTextLength: String(main.innerText || '').length
     };
   }
 
@@ -1640,166 +1622,189 @@
     try { el.dispatchEvent(new PointerEvent('pointerup', { ...eventInit, pointerType: 'mouse', isPrimary: true, buttons: 0 })); } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('mouseup', { ...eventInit, buttons: 0 })); } catch (_) {}
     try { el.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 })); } catch (_) {}
-    try { el.click(); } catch (_) {}
-  }
-
-  async function clickAndVerifySend(button, expectedText = '', beforeState = null, timeout = 12000) {
-    if (!button || !visible(button)) throw new Error('WhatsApp Send button is not available.');
-    if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
-      throw new Error('WhatsApp Send button is disabled.');
-    }
-    debugLog('SEND_BUTTON_CLICK_START', {
-      aria: button.getAttribute('aria-label'), title: button.getAttribute('title'),
-      testid: button.getAttribute('data-testid'), disabled: !!button.disabled
-    });
-    button.focus();
-    // One and only one click. Repeated click synthesis can duplicate messages.
-    button.click();
-
-    const deadline = Date.now() + timeout;
-    let last = null;
-    while (Date.now() < deadline) {
-      await sleep(250);
-      const after = captureOutgoingState(expectedText, []);
-      const editor = findComposer();
-      const remainingText = editor ? getComposerText(editor) : '';
-      last = { after, remainingTextLength: remainingText.length };
-
-      const outgoingAdded = beforeState && after.outgoingNodes > beforeState.outgoingNodes;
-      const textAppeared = expectedText && beforeState && (
-        after.textOccurrences > beforeState.textOccurrences || after.textHits > beforeState.textHits
-      );
-      const composerCleared = !editor || !remainingText;
-      if (outgoingAdded || textAppeared || composerCleared) {
-        // Give WhatsApp a short settle window before declaring success. The
-        // composer normally clears before the outgoing bubble is painted.
-        await sleep(350);
-        const settled = captureOutgoingState(expectedText, []);
-        debugLog('SEND_CLICK_SETTLED', { before: beforeState, after: settled, composerCleared });
-        return true;
-      }
-    }
-    // Once clicked, never permit a blind automatic retry
-    const e = new Error(`WhatsApp Send was clicked but the message was not confirmed. Last state: ${JSON.stringify(last)}`);
-    e.noRetry = true;
-    e.stage = 'send-message';
-    throw e;
   }
 
   async function sendMessage(payload, beforeState) {
     const hasAttachment = !!(payload.attachments?.length);
-    const expectedText = exactText(payload.text ?? '');
+    const expectedText = String(payload.text ?? '').replace(/\r\n?/g, '\n').trim();
     await sleep(400);
 
     if (hasAttachment) {
-      const button = findAttachmentSendButton() || findSendButton();
-      if (!button) throw new Error('WhatsApp attachment Send button was not found.');
-
-      // If text is provided, try to populate caption box in preview modal for atomic sending
-      let captionFilled = false;
       if (expectedText) {
-        try {
-          const captionBox = findCaptionComposer();
-          if (captionBox && visible(captionBox)) {
-            await typeIntoVerifiedEditor(() => findCaptionComposer(), expectedText, 'caption');
-            captionFilled = true;
-            debugLog('ATTACHMENT_CAPTION_FILLED', { expectedText });
+        let captionBox = findCaptionComposer();
+        if (!captionBox) {
+          const captionDeadline = Date.now() + 5000;
+          while (Date.now() < captionDeadline) {
+            await sleep(200);
+            captionBox = findCaptionComposer();
+            if (captionBox) break;
           }
-        } catch (capErr) {
-          debugLog('ATTACHMENT_CAPTION_SKIPPED', { error: capErr?.message || String(capErr) });
         }
+        if (!captionBox) {
+          const err = new Error('WhatsApp caption editor was not found in preview dialog.');
+          err.noRetry = false;
+          err.stage = 'attach-files';
+          throw err;
+        }
+        await clearEditor(captionBox);
+        const setOk = await setEditorText(captionBox, expectedText);
+        if (!setOk) {
+          const err = new Error('WhatsApp editor did not accept the exact scheduled text.');
+          err.noRetry = false;
+          err.stage = 'attach-files';
+          throw err;
+        }
+        debugLog('ATTACHMENT_CAPTION_FILLED', { expectedText });
       }
 
-      const before = captureOutgoingState('', payload.attachments || []);
+      let button = null;
+      const sendButtonDeadline = Date.now() + 10000;
+      while (Date.now() < sendButtonDeadline) {
+        button = findAttachmentSendButton() || findSendButton();
+        if (button && visible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
+          break;
+        }
+        await sleep(250);
+      }
+
+      if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') {
+        const err = new Error('WhatsApp attachment Send button was not found.');
+        err.noRetry = false;
+        err.stage = 'attach-files';
+        throw err;
+      }
+
       debugLog('ATTACHMENT_SEND_BUTTON_CLICK', {
-        aria: button.getAttribute('aria-label'), title: button.getAttribute('title'),
-        testid: button.getAttribute('data-testid'), icon: button.querySelector?.('[data-icon]')?.getAttribute('data-icon') || button.getAttribute('data-icon'),
-        captionFilled
+        aria: button.getAttribute('aria-label'),
+        title: button.getAttribute('title'),
+        testid: button.getAttribute('data-testid')
       });
-      if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
-        throw new Error('WhatsApp attachment Send button is disabled.');
-      }
 
-      // DISPATCH SEND
-      button.focus();
+      currentJobSendPressed = true;
       button.click();
 
       const deadline = Date.now() + 15000;
-      let last = null;
-      let attachmentDispatched = false;
+      let attempts = 0;
+      let nextRetryTime = Date.now() + 3000;
 
       while (Date.now() < deadline) {
-        await sleep(350);
-        const after = captureOutgoingState('', payload.attachments || []);
-        const pending = captureAttachmentComposerState();
-        last = { after, pending };
+        await sleep(200);
+
+        if (!isPreviewOpen()) {
+          debugLog('PREVIEW_CLOSED', { timeMs: Date.now() });
+          const after = captureOutgoingState(expectedText, payload.attachments || []);
+          const rows = [...(document.querySelector('#main')?.querySelectorAll('[role="row"], [data-id]') || [])].filter(visible);
+          const lastRowText = rows.length ? clean(rows[rows.length - 1].innerText || '') : '';
+          const hasFileInLastRow = payload.attachments.some(a => lastRowText.includes(clean(a.name)));
+          debugLog('ATTACHMENT_SEND_SECONDARY_EVIDENCE', {
+            rowIncreased: after.rowCount > (beforeState?.rowCount || 0),
+            hasFileInLastRow,
+            lastRowSample: lastRowText.slice(0, 100)
+          });
+          return true;
+        }
+
         const rejection = getAttachmentRejection();
-
-        const isMedia = areAllMediaFiles(payload.attachments || []);
-        const attachmentEvidence =
-          after.filenameHits > before.filenameHits ||
-          after.filenameOccurrences > before.filenameOccurrences ||
-          (isMedia ? after.mediaHits > before.mediaHits : after.documentHits > before.documentHits);
-
-        if (rejection && !attachmentEvidence) {
+        if (rejection) {
           const e = new Error(`WhatsApp rejected one or more attachments: ${rejection}`);
           e.noRetry = true;
           e.stage = 'send-message';
           throw e;
         }
 
-        if (attachmentEvidence) {
-          attachmentDispatched = true;
-          debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending });
-          break;
+        if (Date.now() >= nextRetryTime && attempts < 2) {
+          attempts++;
+          nextRetryTime = Date.now() + 3000;
+          debugLog('ATTACHMENT_SEND_RETRY_CLICK', { attempt: attempts });
+          button = findAttachmentSendButton() || findSendButton();
+          if (button && visible(button) && isPreviewOpen()) {
+            button.click();
+          }
+          if (attempts === 2) {
+            const captionBox = findCaptionComposer();
+            if (captionBox) {
+              const enterInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+              try { captionBox.dispatchEvent(new KeyboardEvent('keydown', enterInit)); } catch (_) {}
+              try { captionBox.dispatchEvent(new KeyboardEvent('keypress', enterInit)); } catch (_) {}
+              try { captionBox.dispatchEvent(new KeyboardEvent('keyup', enterInit)); } catch (_) {}
+            }
+          }
         }
       }
 
-      if (!attachmentDispatched) {
-        const e = new Error(`WhatsApp attachment Send was clicked but attachment delivery was not confirmed. Last state: ${JSON.stringify(last)}`);
-        e.noRetry = true;
-        e.stage = 'send-message';
-        throw e;
-      }
-
-      // If caption was not supported/filled and text was requested, send as follow-up
-      if (expectedText && !captionFilled) {
-        await sleep(800);
-        try {
-          const textEditor = await waitForComposer(8000);
-          await clearAndType(textEditor, expectedText);
-          await sleep(350);
-          const textButton = findSendButton();
-          if (!textButton) throw new Error('WhatsApp Send button was not found for follow-up message.');
-          const textBefore = captureOutgoingState(expectedText, []);
-          await clickAndVerifySend(textButton, expectedText, textBefore, 12000);
-        } catch (textErr) {
-          debugLog('FOLLOW_UP_TEXT_FAILED', { error: textErr?.message || String(textErr) });
-          // Crucial: do NOT allow retry to re-upload the attachments!
-          const e = new Error(`Attachments were dispatched, but follow-up message text failed: ${textErr.message || String(textErr)}`);
-          e.noRetry = true;
-          e.stage = 'send-message';
-          throw e;
-        }
-      }
-      return;
+      const stillOpen = isPreviewOpen();
+      const e = new Error(`WhatsApp attachment Send was clicked but attachment delivery was not confirmed (preview still open: ${stillOpen}).`);
+      e.noRetry = true;
+      e.stage = 'send-message';
+      throw e;
     }
 
     const button = findSendButton();
     if (!button) throw new Error('WhatsApp Send button was not found after preparing the message.');
-    await clickAndVerifySend(button, expectedText, beforeState, 12000);
+    if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
+      throw new Error('WhatsApp Send button is disabled.');
+    }
+
+    if (currentJobSendPressed) {
+      debugLog('SEND_BUTTON_CLICK_SKIPPED', { reason: 'already_pressed_in_current_job' });
+    } else {
+      currentJobSendPressed = true;
+      debugLog('SEND_BUTTON_CLICK_START', {
+        aria: button.getAttribute('aria-label'), title: button.getAttribute('title'),
+        testid: button.getAttribute('data-testid'), disabled: !button.disabled
+      });
+      button.click();
+    }
+
+    const textDeadline = Date.now() + 10000;
+    while (Date.now() < textDeadline) {
+      await sleep(200);
+      const editor = findComposer();
+      const text = editor ? norm(readEditor(editor)) : '';
+      if (!text) {
+        await sleep(350);
+        debugLog('SEND_COMPLETE_TEXT_CLEARED', { composerEmpty: true });
+        return true;
+      }
+    }
+
+    const e = new Error('WhatsApp Send was clicked but composer text was not cleared.');
+    e.noRetry = true;
+    e.stage = 'send-message';
+    throw e;
   }
 
+  async function cleanupEditorAndDialogs() {
+    try {
+      const composer = findComposer();
+      if (composer && norm(readEditor(composer))) {
+        await clearEditor(composer);
+      }
+    } catch (_) {}
+    try {
+      const caption = findCaptionComposer();
+      if (caption && norm(readEditor(caption))) {
+        await clearEditor(caption);
+      }
+    } catch (_) {}
+    if (isPreviewOpen()) {
+      await closeAnyPreviewDialog();
+      await sleep(200);
+    }
+  }
 
   async function sendScheduledMessage(payload) {
+    let success = false;
+    const startTime = Date.now();
     const run = async (stage, fn) => {
+      const stageStart = Date.now();
       try {
         debugLog('SEND_STAGE_START', { stage, contact: payload.contact?.name });
         const result = await fn();
-        debugLog('SEND_STAGE_OK', { stage, contact: payload.contact?.name });
+        debugLog('SEND_STAGE_OK', { stage, durationMs: Date.now() - stageStart, contact: payload.contact?.name });
         return result;
       } catch (error) {
-        debugLog('SEND_STAGE_ERROR', { stage, error: error?.message || String(error), contact: payload.contact?.name });
+        debugLog('SEND_STAGE_ERROR', { stage, durationMs: Date.now() - stageStart, error: error?.message || String(error), contact: payload.contact?.name });
         const wrapped = new Error(error?.message || String(error));
         wrapped.stage = stage;
         wrapped.noRetry = !!error?.noRetry;
@@ -1807,21 +1812,36 @@
       }
     };
 
-    await sleep(350);
-    await run('open-contact', () => openContact(payload.contact));
+    try {
+      currentJobSendPressed = false;
+      currentJobDropAttempted = false;
+      await sleep(350);
+      await run('open-contact', () => openContact(payload.contact));
 
-    const beforeState = captureOutgoingState(payload.text, payload.attachments || []);
+      // Before the first insert of every job, clear composer so drafts left from earlier failures can never be prepended or duplicated
+      const initialComposer = findComposer();
+      if (initialComposer) {
+        await clearEditor(initialComposer);
+      }
 
-    if (payload.attachments?.length) {
-      await run('attach-files', () => attachFiles(payload.attachments));
+      const beforeState = captureOutgoingState(payload.text, payload.attachments || []);
+
+      if (payload.attachments?.length) {
+        await run('attach-files', () => attachFiles(payload.attachments));
+      }
+      if (!payload.attachments?.length && payload.text) {
+        await run('type-message', () => typeIntoVerifiedEditor(findComposer, payload.text, 'message'));
+      }
+
+      await run('send-message', () => sendMessage(payload, beforeState));
+      debugLog('SEND_COMPLETE', { durationMs: Date.now() - startTime, contact: payload.contact?.name });
+      success = true;
+      return { success: true };
+    } finally {
+      if (!success) {
+        await cleanupEditorAndDialogs();
+      }
     }
-    if (!payload.attachments?.length && payload.text) {
-      await run('type-message', () => typeIntoVerifiedEditor(findComposer, payload.text, 'message'));
-    }
-
-    await run('send-message', () => sendMessage(payload, beforeState));
-    debugLog('SEND_COMPLETE', { contact: payload.contact?.name });
-    return { success: true };
   }
 
 
