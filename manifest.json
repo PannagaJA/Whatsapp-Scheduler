@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp Web Scheduler",
-  "version": "1.4.34",
+  "version": "1.4.37",
+  "minimum_chrome_version": "111",
   "description": "Schedule WhatsApp Web messages and attachments with contact selection and diagnostics.",
   "permissions": [
     "storage",
@@ -26,6 +27,16 @@
     }
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
+      "js": [
+        "content/wa-main-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://web.whatsapp.com/*"
