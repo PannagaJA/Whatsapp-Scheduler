@@ -11,6 +11,7 @@ const CHUNK_SIZE = 200 * 1024;
 // in-memory because the actual schedule remains persisted in chrome.storage.
 const tabSendQueues = new Map();
 const processingIds = new Set();
+const stagingChunks = new Map();
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
 
 function enqueueTabSend(tabId, task) {
@@ -23,21 +24,52 @@ function enqueueTabSend(tabId, task) {
   return current;
 }
 
-async function sha256Hex(blob) {
-  const buffer = await blob.arrayBuffer();
+async function sha256Hex(input) {
+  let buffer;
+  if (input instanceof Blob) {
+    buffer = await input.arrayBuffer();
+  } else if (input instanceof ArrayBuffer) {
+    buffer = input;
+  } else if (ArrayBuffer.isView(input)) {
+    buffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
+  } else {
+    throw new TypeError('Invalid input for sha256Hex');
+  }
   const digest = await crypto.subtle.digest('SHA-256', buffer);
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const dbPromise = new Promise((resolve, reject) => {
-  const request = indexedDB.open('waScheduler', 1);
-  request.onupgradeneeded = () => {
-    const db = request.result;
-    if (!db.objectStoreNames.contains('attachments')) db.createObjectStore('attachments', { keyPath: 'id' });
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
+let dbPromise = null;
+function getDb() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    try {
+      const request = indexedDB.open('waScheduler', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('attachments')) db.createObjectStore('attachments', { keyPath: 'id' });
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => { try { db.close(); } catch (_) {} dbPromise = null; };
+        db.onclose = () => { dbPromise = null; };
+        resolve(db);
+      };
+      request.onerror = () => {
+        dbPromise = null;
+        reject(request.error || new Error('Failed to open IndexedDB'));
+      };
+      request.onblocked = () => {
+        dbPromise = null;
+        reject(new Error('IndexedDB open blocked'));
+      };
+    } catch (e) {
+      dbPromise = null;
+      reject(e);
+    }
+  });
+  return dbPromise;
+}
 
 async function getMessages() {
   const { messages = [] } = await chrome.storage.local.get('messages');
@@ -64,33 +96,69 @@ async function updateMessage(id, patch) {
 function alarmName(id) { return ALARM_PREFIX + id; }
 function retryAlarmName(id) { return RETRY_PREFIX + id; }
 
-async function putAttachment(id, blob, name, type, size, hash = null, lastModified = 0) {
-  const db = await dbPromise;
+async function putAttachment(id, blob, name, type, size, hash = null, lastModified = 0, pending = false) {
+  const db = await getDb();
+  let buffer = null;
+  if (blob instanceof Blob) {
+    try { buffer = await blob.arrayBuffer(); } catch (_) {}
+  } else if (blob instanceof ArrayBuffer) {
+    buffer = blob;
+    blob = new Blob([buffer], { type: type || 'application/octet-stream' });
+  } else if (ArrayBuffer.isView(blob)) {
+    buffer = blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength);
+    blob = new Blob([buffer], { type: type || 'application/octet-stream' });
+  }
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('attachments', 'readwrite');
-    tx.objectStore('attachments').put({ id, blob, name, type, size, hash, lastModified });
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
+    try {
+      const tx = db.transaction('attachments', 'readwrite');
+      const store = tx.objectStore('attachments');
+      store.put({ id, blob, buffer, name, type, size, hash, lastModified, pending });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB put error'));
+      tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
 async function getAttachment(id) {
-  const db = await dbPromise;
+  const db = await getDb();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('attachments', 'readonly');
-    const req = tx.objectStore('attachments').get(id);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
+    try {
+      const tx = db.transaction('attachments', 'readonly');
+      const req = tx.objectStore('attachments').get(id);
+      req.onsuccess = () => {
+        const item = req.result;
+        if (item) {
+          if (!item.blob && item.buffer) {
+            item.blob = new Blob([item.buffer], { type: item.type || 'application/octet-stream' });
+          } else if (item.blob && !(item.blob instanceof Blob)) {
+            item.blob = new Blob([item.blob], { type: item.type || 'application/octet-stream' });
+          }
+        }
+        resolve(item || null);
+      };
+      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
 async function deleteAttachment(id) {
-  const db = await dbPromise;
+  const db = await getDb();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction('attachments', 'readwrite');
-    tx.objectStore('attachments').delete(id);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
+    try {
+      const tx = db.transaction('attachments', 'readwrite');
+      const req = tx.objectStore('attachments').delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      tx.onerror = () => reject(tx.error);
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
@@ -103,19 +171,15 @@ async function createSchedule(payload) {
     for (const file of payload.attachments || []) {
       if (!file?.id) throw new Error(`Attachment reference missing for ${file?.name || 'unnamed file'}.`);
       const staged = await getAttachment(file.id);
-      if (!staged?.blob) throw new Error(`Staged attachment not found for ${file.name || file.id}.`);
+      if (!staged?.blob && !staged?.buffer) throw new Error(`Staged attachment not found for ${file.name || file.id}.`);
 
-      const blob = staged.blob instanceof Blob ? staged.blob : new Blob([staged.blob], { type: file.type || 'application/octet-stream' });
-      if (Number.isFinite(file.size) && blob.size !== file.size) {
-        throw new Error(`Attachment size mismatch for ${file.name}: expected ${file.size} bytes, received ${blob.size} bytes.`);
-      }
+      const canonicalType = file.type || staged.type || 'application/octet-stream';
+      const size = Number.isFinite(file.size) ? file.size : (staged.size || staged.blob?.size || staged.buffer?.byteLength || 0);
+      const hash = staged.hash || file.hash || (staged.buffer ? await sha256Hex(staged.buffer) : await sha256Hex(staged.blob));
 
-      // Hash the exact Blob stored by the file picker. The Blob is never decoded,
-      // transcoded, recompressed, or reconstructed through text/base64.
-      const hash = await sha256Hex(blob);
-      const canonicalType = file.type || staged.type || blob.type || 'application/octet-stream';
-      await putAttachment(file.id, blob, file.name, canonicalType, blob.size, hash, file.lastModified || staged.lastModified || 0);
-      attachments.push({ id: file.id, name: file.name, type: canonicalType, size: blob.size, hash, lastModified: file.lastModified || staged.lastModified || 0 });
+      // Mark the attachment record as committed / no longer pending
+      await putAttachment(file.id, staged.blob || staged.buffer, file.name, canonicalType, size, hash, file.lastModified || staged.lastModified || 0, false);
+      attachments.push({ id: file.id, name: file.name, type: canonicalType, size, hash, lastModified: file.lastModified || staged.lastModified || 0 });
       committed.push(file.id);
     }
 
@@ -136,19 +200,6 @@ async function createSchedule(payload) {
     await setMessages(messages);
     await chrome.alarms.create(alarmName(id), { when: message.scheduledAt });
 
-    // These records are now owned by the scheduled message, not the staging UI.
-    for (const attachmentId of committed) {
-      const item = await getAttachment(attachmentId);
-      if (item) {
-        const db = await dbPromise;
-        await new Promise((resolve, reject) => {
-          const tx = db.transaction('attachments', 'readwrite');
-          tx.objectStore('attachments').put({ ...item, pending: false });
-          tx.oncomplete = resolve;
-          tx.onerror = () => reject(tx.error);
-        });
-      }
-    }
     return message;
   } catch (error) {
     for (const attachmentId of committed) { try { await deleteAttachment(attachmentId); } catch (_) {} }
@@ -408,6 +459,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           done: end >= buffer.byteLength,
           chunkBase64: btoa(binary)
         });
+      } else if (message.type === 'STAGE_ATTACHMENT') {
+        const { id, name, fileType, mimeType, type, size, lastModified, base64 } = message;
+        const canonicalType = fileType || mimeType || (type !== 'STAGE_ATTACHMENT' ? type : '') || 'application/octet-stream';
+        const binary = atob(base64 || '');
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const hash = await sha256Hex(bytes);
+        await putAttachment(id, bytes.buffer, name, canonicalType, bytes.byteLength, hash, lastModified || 0, true);
+        sendResponse({ success: true, id, size: bytes.byteLength, hash });
+      } else if (message.type === 'STAGE_ATTACHMENT_CHUNK') {
+        const { id, name, fileType, mimeType, type, size, lastModified, offset, chunkBase64, done } = message;
+        const canonicalType = fileType || mimeType || (type !== 'STAGE_ATTACHMENT_CHUNK' ? type : '') || 'application/octet-stream';
+        let entry = stagingChunks.get(id);
+        if (!entry) {
+          entry = { name, type: canonicalType, size, lastModified, chunks: [] };
+          stagingChunks.set(id, entry);
+        }
+        if (chunkBase64) {
+          const binary = atob(chunkBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          entry.chunks.push(bytes);
+        }
+        if (done) {
+          stagingChunks.delete(id);
+          const totalBlob = new Blob(entry.chunks, { type: entry.type || 'application/octet-stream' });
+          const hash = await sha256Hex(totalBlob);
+          await putAttachment(id, totalBlob, entry.name, entry.type, totalBlob.size, hash, entry.lastModified || 0, true);
+          sendResponse({ success: true, id, size: totalBlob.size, hash });
+        } else {
+          sendResponse({ success: true, id, offset });
+        }
+      } else if (message.type === 'DELETE_ATTACHMENT') {
+        await deleteAttachment(message.id);
+        sendResponse({ success: true });
       } else if (message.type === 'GET_STATUS') {
         const tab = await findWhatsAppTab();
         if (!tab) return sendResponse({ success: true, whatsappOpen: false, connected: false, tabId: null });
@@ -432,6 +518,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await ensureContentScript(tab.id);
         const result = await chrome.tabs.sendMessage(tab.id, { type: 'OPEN_CONTACT', name: message.name });
         sendResponse({ success: true, ...result });
+      } else {
+        sendResponse({ success: false, error: `Unhandled message type: ${message?.type}` });
       }
     } catch (error) {
       sendResponse({ success: false, error: error?.message || String(error) });

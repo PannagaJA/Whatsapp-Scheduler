@@ -22,6 +22,12 @@
     return String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   }
 
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>'"]/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[c]));
+  }
+
   const GENERIC_LABELS = new Set([
     'search', 'menu', 'more', 'back', 'close', 'attach', 'send',
     'search messages', 'video call', 'voice call', 'conversation info', 'profile details', 'contact info',
@@ -790,10 +796,20 @@
     return false;
   }
 
+  function isSchedulerUiElement(el) {
+    if (!el) return false;
+    return !!(
+      el.closest?.('[data-wa-sched-ui]') ||
+      el.closest?.('#wa-sched-modal-root') ||
+      el.closest?.('#wa-sched-inchat-btn') ||
+      el.id === 'wa-sched-inchat-file-input'
+    );
+  }
+
   function selectFileInput(allInputs, files) {
     const isAllMedia = areAllMediaFiles(files);
     const validInputs = allInputs.filter(inp => {
-      if (!inp || !inp.isConnected || inp.disabled) return false;
+      if (!inp || !inp.isConnected || inp.disabled || isSchedulerUiElement(inp)) return false;
       const accept = String(inp.accept || '').trim().toLowerCase();
       const menuLabel = getMenuLabel(inp);
       if (accept === 'image/*' && !inp.multiple) return false;
@@ -871,7 +887,7 @@
   }
 
   function findFileInput(preferredFiles = [], kind = 'document') {
-    const inputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !isStickerElement(el));
+    const inputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !isStickerElement(el) && !isSchedulerUiElement(el));
     if (!inputs.length) return null;
     const isMedia = kind === 'media' || areAllMediaFiles(preferredFiles);
     const wantedTypes = preferredFiles.map(f => String(f.type || '').toLowerCase()).filter(Boolean);
@@ -980,8 +996,8 @@
         for (const el of elements) {
           if (!visible(el)) continue;
 
-          // Skip chat messages, chat history containers, and sidebar
-          if (el.closest('#main [data-testid="conversation-panel-messages"], #main .copyable-area, [data-id], .message-in, .message-out, [data-pre-plain-text], #side, #pane-side')) continue;
+          // Skip chat messages, chat history containers, sidebar, and extension UI
+          if (el.closest('#main [data-testid="conversation-panel-messages"], #main .copyable-area, [data-id], .message-in, .message-out, [data-pre-plain-text], #side, #pane-side') || isSchedulerUiElement(el)) continue;
 
           // STRICTLY REJECT sticker elements
           if (isStickerElement(el)) continue;
@@ -1007,13 +1023,13 @@
 
           if (score > 0) {
             const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li, label') || el;
-            if (seen.has(clickable) || isStickerElement(clickable)) continue;
+            if (seen.has(clickable) || isStickerElement(clickable) || isSchedulerUiElement(clickable)) continue;
             seen.add(clickable);
 
             const directInput = clickable.querySelector?.('input[type="file"]') ||
                                 el.querySelector?.('input[type="file"]') ||
                                 clickable.parentElement?.querySelector?.('input[type="file"]');
-            if (directInput && !isStickerElement(directInput)) score += 2000;
+            if (directInput && !isStickerElement(directInput) && !isSchedulerUiElement(directInput)) score += 2000;
 
             candidates.push({ el: clickable, input: directInput, score, text: ownText, aria, testid, icon });
           }
@@ -1056,7 +1072,7 @@
   }
 
   function rankDocumentInput(inputs) {
-    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file' && !isMediaOnlyInput(el) && !isStickerElement(el)).map(input => {
+    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file' && !isMediaOnlyInput(el) && !isStickerElement(el) && !isSchedulerUiElement(el)).map(input => {
       const accept = String(input.accept || '').toLowerCase();
       const context = clean([
         input.getAttribute('aria-label'), input.getAttribute('title'), input.getAttribute('data-testid'),
@@ -1330,7 +1346,7 @@
       let selected = null;
       let lastSnapshot = [];
       while (Date.now() < inputDeadline) {
-        const allInputs = [...document.querySelectorAll('input[type="file"]')].filter(inp => inp.isConnected);
+        const allInputs = [...document.querySelectorAll('input[type="file"]')].filter(inp => inp.isConnected && !isSchedulerUiElement(inp));
         lastSnapshot = allInputs.map(inp => ({
           accept: inp.accept,
           multiple: inp.multiple,
@@ -2101,6 +2117,838 @@
   };
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
   window[RUNTIME_LISTENER_KEY]={version:EXTENSION_VERSION,teardown(){try{chrome.runtime.onMessage.removeListener(onRuntimeMessage);}catch(_){}}};
+
+  // ==========================================
+  // IN-CHAT SCHEDULER UI & MODAL MODULE
+  // ==========================================
+
+  const INCHAT_STYLE_ID = 'wa-sched-inchat-styles';
+  const INCHAT_BTN_ID = 'wa-sched-inchat-btn';
+  const INCHAT_MODAL_ROOT_ID = 'wa-sched-modal-root';
+
+  function injectInChatStyles() {
+    if (document.getElementById(INCHAT_STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = INCHAT_STYLE_ID;
+    style.textContent = `
+      #${INCHAT_BTN_ID} {
+        background: transparent;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        min-height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        align-self: center;
+        cursor: pointer;
+        color: var(--icon, #8696a0);
+        transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+        margin: 0 4px;
+        padding: 8px;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        line-height: 0;
+      }
+      body.dark #${INCHAT_BTN_ID} {
+        color: var(--icon, #aebac1);
+      }
+      #${INCHAT_BTN_ID}:hover {
+        background-color: rgba(134, 150, 160, 0.12);
+        color: #00a884;
+        transform: scale(1.06);
+      }
+      #${INCHAT_BTN_ID}:active {
+        transform: scale(0.94);
+      }
+      #${INCHAT_BTN_ID} svg {
+        width: 24px;
+        height: 24px;
+        display: block;
+      }
+
+      /* In-chat Modal Overlay */
+      .wa-sched-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(11, 20, 26, 0.72);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.22s ease, visibility 0.22s ease;
+      }
+      .wa-sched-overlay.active {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      /* In-chat Modal Card */
+      .wa-sched-card {
+        background: #202c33;
+        color: #e9edef;
+        width: 90%;
+        max-width: 480px;
+        border-radius: 14px;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transform: scale(0.92) translateY(12px);
+        transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      body:not(.dark) .wa-sched-card {
+        background: #ffffff;
+        color: #111b21;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
+      }
+      .wa-sched-overlay.active .wa-sched-card {
+        transform: scale(1) translateY(0);
+      }
+
+      /* Header */
+      .wa-sched-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(134, 150, 160, 0.15);
+      }
+      .wa-sched-head-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .wa-sched-logo-icon {
+        width: 32px;
+        height: 32px;
+        background: rgba(0, 168, 132, 0.15);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #00a884;
+      }
+      .wa-sched-title {
+        font-size: 16px;
+        font-weight: 600;
+        line-height: 1.2;
+      }
+      .wa-sched-recipient {
+        font-size: 12px;
+        color: #8696a0;
+        margin-top: 2px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .wa-sched-recipient strong {
+        color: #00a884;
+        font-weight: 600;
+      }
+      .wa-sched-close-btn {
+        background: transparent;
+        border: none;
+        color: #8696a0;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.15s;
+      }
+      .wa-sched-close-btn:hover {
+        background: rgba(134, 150, 160, 0.15);
+        color: #e9edef;
+      }
+      body:not(.dark) .wa-sched-close-btn:hover {
+        color: #111b21;
+      }
+
+      /* Body */
+      .wa-sched-body {
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        max-height: 72vh;
+        overflow-y: auto;
+      }
+      .wa-sched-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .wa-sched-field label {
+        font-size: 12px;
+        font-weight: 500;
+        color: #8696a0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .wa-sched-textarea {
+        background: #111b21;
+        border: 1px solid rgba(134, 150, 160, 0.2);
+        border-radius: 8px;
+        padding: 10px 12px;
+        color: inherit;
+        font-size: 14px;
+        font-family: inherit;
+        resize: vertical;
+        min-height: 80px;
+        max-height: 180px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      body:not(.dark) .wa-sched-textarea {
+        background: #f0f2f5;
+        border-color: rgba(0, 0, 0, 0.12);
+      }
+      .wa-sched-textarea:focus {
+        border-color: #00a884;
+      }
+
+      /* Attachments list */
+      .wa-sched-files-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .wa-sched-files-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .wa-sched-attach-btn {
+        background: rgba(134, 150, 160, 0.12);
+        border: 1px dashed rgba(134, 150, 160, 0.3);
+        border-radius: 8px;
+        color: inherit;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.15s;
+      }
+      .wa-sched-attach-btn:hover {
+        background: rgba(0, 168, 132, 0.12);
+        border-color: #00a884;
+        color: #00a884;
+      }
+      .wa-sched-files-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .wa-sched-file-tag {
+        background: rgba(134, 150, 160, 0.16);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .wa-sched-file-remove {
+        cursor: pointer;
+        color: #8696a0;
+        font-weight: bold;
+        padding: 0 2px;
+      }
+      .wa-sched-file-remove:hover {
+        color: #ea4335;
+      }
+
+      /* Date & Time Row */
+      .wa-sched-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .wa-sched-input {
+        background: #111b21;
+        border: 1px solid rgba(134, 150, 160, 0.2);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: inherit;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.2s;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      body:not(.dark) .wa-sched-input {
+        background: #f0f2f5;
+        border-color: rgba(0, 0, 0, 0.12);
+      }
+      .wa-sched-input:focus {
+        border-color: #00a884;
+      }
+
+      /* Presets Chips */
+      .wa-sched-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .wa-sched-chip {
+        background: rgba(134, 150, 160, 0.1);
+        border: 1px solid rgba(134, 150, 160, 0.15);
+        border-radius: 14px;
+        color: #8696a0;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .wa-sched-chip:hover {
+        background: rgba(0, 168, 132, 0.15);
+        border-color: #00a884;
+        color: #00a884;
+      }
+
+      /* Status message */
+      .wa-sched-status {
+        font-size: 12px;
+        min-height: 16px;
+        line-height: 1.4;
+      }
+      .wa-sched-status.error { color: #f15c6d; }
+      .wa-sched-status.success { color: #00a884; }
+      .wa-sched-status.info { color: #53bdeb; }
+
+      /* Footer */
+      .wa-sched-foot {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 14px 20px;
+        border-top: 1px solid rgba(134, 150, 160, 0.15);
+      }
+      .wa-sched-btn {
+        border: none;
+        border-radius: 8px;
+        padding: 9px 18px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .wa-sched-btn-sec {
+        background: transparent;
+        color: #8696a0;
+      }
+      .wa-sched-btn-sec:hover {
+        background: rgba(134, 150, 160, 0.12);
+        color: #e9edef;
+      }
+      body:not(.dark) .wa-sched-btn-sec:hover {
+        color: #111b21;
+      }
+      .wa-sched-btn-prim {
+        background: #00a884;
+        color: #ffffff;
+      }
+      .wa-sched-btn-prim:hover {
+        background: #06cf9c;
+        box-shadow: 0 2px 10px rgba(0, 168, 132, 0.35);
+      }
+      .wa-sched-btn-prim:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Toast */
+      .wa-sched-toast {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-20px);
+        background: #00a884;
+        color: #ffffff;
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        z-index: 1000000;
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .wa-sched-toast.active {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  let inChatModalElement = null;
+  let inChatSelectedFiles = [];
+
+  function showInChatToast(text, duration = 3500) {
+    let toast = document.getElementById('wa-sched-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'wa-sched-toast';
+      toast.className = 'wa-sched-toast';
+      document.body.appendChild(toast);
+    }
+    toast.innerHTML = `<span>✓</span> <span>${clean(text)}</span>`;
+    toast.classList.add('active');
+    setTimeout(() => {
+      toast.classList.remove('active');
+    }, duration);
+  }
+
+  function padZero(n) { return String(n).padStart(2, '0'); }
+
+  function setInChatDateTime(dateObj) {
+    const dateInput = document.getElementById('wa-sched-inchat-date');
+    const timeInput = document.getElementById('wa-sched-inchat-time');
+    if (dateInput && timeInput) {
+      dateInput.value = `${dateObj.getFullYear()}-${padZero(dateObj.getMonth() + 1)}-${padZero(dateObj.getDate())}`;
+      timeInput.value = `${padZero(dateObj.getHours())}:${padZero(dateObj.getMinutes())}`;
+    }
+  }
+
+  function renderInChatFileList() {
+    const listEl = document.getElementById('wa-sched-inchat-files-list');
+    if (!listEl) return;
+    listEl.innerHTML = inChatSelectedFiles.map((file, idx) => `
+      <div class="wa-sched-file-tag">
+        <span>📎 ${clean(file.name).slice(0, 24)} (${(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+        <span class="wa-sched-file-remove" data-idx="${idx}">✕</span>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('.wa-sched-file-remove').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        inChatSelectedFiles.splice(idx, 1);
+        renderInChatFileList();
+      };
+    });
+  }
+
+  function sendRuntimeMessageWithTimeout(msg, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          reject(new Error('Background service worker response timed out.'));
+        }
+      }, timeoutMs);
+
+      try {
+        chrome.runtime.sendMessage(msg, (response) => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message || 'Extension runtime error'));
+          } else {
+            resolve(response);
+          }
+        });
+      } catch (err) {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          reject(err);
+        }
+      }
+    });
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const commaIdx = result.indexOf(',');
+        const base64 = commaIdx >= 0 ? result.slice(commaIdx + 1) : result;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function stageAttachmentFromContent(file, onProgress) {
+    const id = crypto.randomUUID();
+    const fileType = file.type || 'application/octet-stream';
+    const CHUNK_SIZE = 250 * 1024;
+    if (file.size <= CHUNK_SIZE) {
+      if (onProgress) onProgress(30);
+      const base64 = await fileToBase64(file);
+      if (onProgress) onProgress(70);
+
+      const res = await sendRuntimeMessageWithTimeout({
+        type: 'STAGE_ATTACHMENT',
+        id,
+        name: file.name,
+        fileType,
+        size: file.size,
+        lastModified: file.lastModified || 0,
+        base64
+      }, 30000);
+
+      if (onProgress) onProgress(100);
+      if (!res?.success) throw new Error(res?.error || `Failed to stage ${file.name}`);
+      return { id, name: file.name, type: fileType, size: file.size, lastModified: file.lastModified || 0 };
+    }
+
+    let offset = 0;
+    while (offset < file.size) {
+      const slice = file.slice(offset, offset + CHUNK_SIZE);
+      const chunkBase64 = await fileToBase64(slice);
+      const done = (offset + slice.size) >= file.size;
+      const res = await sendRuntimeMessageWithTimeout({
+        type: 'STAGE_ATTACHMENT_CHUNK',
+        id,
+        name: file.name,
+        fileType,
+        size: file.size,
+        lastModified: file.lastModified || 0,
+        offset,
+        chunkBase64,
+        done
+      }, 30000);
+      if (!res?.success) throw new Error(res?.error || `Failed to upload chunk of ${file.name}`);
+      offset += slice.size;
+      if (onProgress) onProgress(Math.min(99, Math.round((offset / file.size) * 100)));
+    }
+    if (onProgress) onProgress(100);
+    return { id, name: file.name, type: fileType, size: file.size, lastModified: file.lastModified || 0 };
+  }
+
+  function createInChatModal() {
+    if (document.getElementById(INCHAT_MODAL_ROOT_ID)) return;
+    injectInChatStyles();
+
+    const root = document.createElement('div');
+    root.id = INCHAT_MODAL_ROOT_ID;
+    root.setAttribute('data-wa-sched-ui', 'true');
+    root.innerHTML = `
+      <div class="wa-sched-overlay" id="wa-sched-inchat-overlay">
+        <div class="wa-sched-card" id="wa-sched-inchat-card">
+          <div class="wa-sched-head">
+            <div class="wa-sched-head-left">
+              <div class="wa-sched-logo-icon">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9.5"></circle>
+                  <polyline points="12 6.5 12 12 15.5 14"></polyline>
+                </svg>
+              </div>
+              <div>
+                <div class="wa-sched-title">Schedule Message</div>
+                <div class="wa-sched-recipient" id="wa-sched-inchat-recipient">To: <strong>Loading…</strong></div>
+              </div>
+            </div>
+            <button type="button" class="wa-sched-close-btn" id="wa-sched-inchat-close-btn">✕</button>
+          </div>
+
+          <div class="wa-sched-body">
+            <div class="wa-sched-field">
+              <label for="wa-sched-inchat-text">Message</label>
+              <textarea id="wa-sched-inchat-text" class="wa-sched-textarea" placeholder="Type scheduled message…"></textarea>
+            </div>
+
+            <div class="wa-sched-field">
+              <div class="wa-sched-files-head">
+                <label>Attachments</label>
+                <button type="button" class="wa-sched-attach-btn" id="wa-sched-inchat-browse-btn">
+                  📎 Add File
+                </button>
+              </div>
+              <input type="file" id="wa-sched-inchat-file-input" multiple style="display:none">
+              <div class="wa-sched-files-list" id="wa-sched-inchat-files-list"></div>
+            </div>
+
+            <div class="wa-sched-grid">
+              <div class="wa-sched-field">
+                <label for="wa-sched-inchat-date">Date</label>
+                <input type="date" id="wa-sched-inchat-date" class="wa-sched-input">
+              </div>
+              <div class="wa-sched-field">
+                <label for="wa-sched-inchat-time">Time</label>
+                <input type="time" id="wa-sched-inchat-time" class="wa-sched-input">
+              </div>
+            </div>
+
+            <div class="wa-sched-chips">
+              <button type="button" class="wa-sched-chip" data-preset="15m">+15 min</button>
+              <button type="button" class="wa-sched-chip" data-preset="1h">+1 hr</button>
+              <button type="button" class="wa-sched-chip" data-preset="3h">+3 hrs</button>
+              <button type="button" class="wa-sched-chip" data-preset="tomorrow9">Tomorrow 9 AM</button>
+              <button type="button" class="wa-sched-chip" data-preset="tomorrow18">Tomorrow 6 PM</button>
+            </div>
+
+            <div id="wa-sched-inchat-status" class="wa-sched-status"></div>
+          </div>
+
+          <div class="wa-sched-foot">
+            <button type="button" class="wa-sched-btn wa-sched-btn-sec" id="wa-sched-inchat-cancel-btn">Cancel</button>
+            <button type="button" class="wa-sched-btn wa-sched-btn-prim" id="wa-sched-inchat-submit-btn">Schedule Message</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(root);
+
+    const overlay = document.getElementById('wa-sched-inchat-overlay');
+    const closeBtn = document.getElementById('wa-sched-inchat-close-btn');
+    const cancelBtn = document.getElementById('wa-sched-inchat-cancel-btn');
+    const browseBtn = document.getElementById('wa-sched-inchat-browse-btn');
+    const fileInput = document.getElementById('wa-sched-inchat-file-input');
+    const submitBtn = document.getElementById('wa-sched-inchat-submit-btn');
+
+    const closeModal = () => {
+      overlay.classList.remove('active');
+    };
+
+    closeBtn.onclick = closeModal;
+    cancelBtn.onclick = closeModal;
+    overlay.onclick = (e) => {
+      if (e.target === overlay) closeModal();
+    };
+
+    browseBtn.onclick = () => fileInput.click();
+    fileInput.onchange = () => {
+      if (fileInput.files?.length) {
+        for (const file of fileInput.files) {
+          inChatSelectedFiles.push(file);
+        }
+        fileInput.value = '';
+        renderInChatFileList();
+      }
+    };
+
+    // Preset time buttons
+    root.querySelectorAll('[data-preset]').forEach(chip => {
+      chip.onclick = () => {
+        const preset = chip.getAttribute('data-preset');
+        const now = new Date();
+        if (preset === '15m') now.setMinutes(now.getMinutes() + 15);
+        else if (preset === '1h') now.setHours(now.getHours() + 1);
+        else if (preset === '3h') now.setHours(now.getHours() + 3);
+        else if (preset === 'tomorrow9') {
+          now.setDate(now.getDate() + 1);
+          now.setHours(9, 0, 0, 0);
+        } else if (preset === 'tomorrow18') {
+          now.setDate(now.getDate() + 1);
+          now.setHours(18, 0, 0, 0);
+        }
+        setInChatDateTime(now);
+      };
+    });
+
+    submitBtn.onclick = async () => {
+      const statusEl = document.getElementById('wa-sched-inchat-status');
+      const text = document.getElementById('wa-sched-inchat-text').value.trim();
+      const dateVal = document.getElementById('wa-sched-inchat-date').value;
+      const timeVal = document.getElementById('wa-sched-inchat-time').value;
+      const current = getCurrentChat();
+      const contactName = current?.name || getHeaderTitle();
+
+      if (!contactName) {
+        statusEl.className = 'wa-sched-status error';
+        statusEl.textContent = 'No active WhatsApp chat detected.';
+        return;
+      }
+      if (!text && !inChatSelectedFiles.length) {
+        statusEl.className = 'wa-sched-status error';
+        statusEl.textContent = 'Please enter a message or attach a file.';
+        return;
+      }
+      if (!dateVal || !timeVal) {
+        statusEl.className = 'wa-sched-status error';
+        statusEl.textContent = 'Please select scheduled date and time.';
+        return;
+      }
+
+      const scheduledAt = new Date(`${dateVal}T${timeVal}`).getTime();
+      if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
+        statusEl.className = 'wa-sched-status error';
+        statusEl.textContent = 'Scheduled time must be in the future.';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      statusEl.className = 'wa-sched-status info';
+      statusEl.textContent = inChatSelectedFiles.length ? 'Uploading attachments…' : 'Scheduling…';
+
+      try {
+        const stagedAttachments = [];
+        for (let i = 0; i < inChatSelectedFiles.length; i++) {
+          const file = inChatSelectedFiles[i];
+          statusEl.textContent = `Uploading attachment ${i + 1} of ${inChatSelectedFiles.length}…`;
+          const meta = await stageAttachmentFromContent(file, (pct) => {
+            statusEl.textContent = `Uploading ${clean(file.name).slice(0, 16)} (${pct}%)…`;
+          });
+          stagedAttachments.push(meta);
+        }
+
+        statusEl.textContent = 'Saving schedule…';
+        const res = await sendRuntimeMessageWithTimeout({
+          type: 'CREATE_SCHEDULE',
+          payload: {
+            contact: { name: contactName },
+            text,
+            scheduledAt,
+            attachments: stagedAttachments
+          }
+        });
+
+        if (!res?.success) {
+          statusEl.className = 'wa-sched-status error';
+          statusEl.textContent = res?.error || 'Failed to schedule message.';
+          return;
+        }
+
+        inChatSelectedFiles = [];
+        renderInChatFileList();
+        document.getElementById('wa-sched-inchat-text').value = '';
+        closeModal();
+        showInChatToast(`Scheduled for ${new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} to ${contactName}`);
+      } catch (err) {
+        statusEl.className = 'wa-sched-status error';
+        statusEl.textContent = err?.message || 'Failed to schedule message.';
+      } finally {
+        submitBtn.disabled = false;
+      }
+    };
+
+    // Close on Escape
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && overlay.classList.contains('active')) {
+        e.stopPropagation();
+        closeModal();
+      }
+    }, true);
+  }
+
+  function openInChatModal() {
+    try {
+      createInChatModal();
+      const overlay = document.getElementById('wa-sched-inchat-overlay');
+      const recipientEl = document.getElementById('wa-sched-inchat-recipient');
+      const textEl = document.getElementById('wa-sched-inchat-text');
+      const statusEl = document.getElementById('wa-sched-inchat-status');
+
+      const current = getCurrentChat();
+      const contactName = current?.name || getHeaderTitle();
+      debugLog('INCHAT_MODAL_OPEN', { contactName });
+
+      recipientEl.innerHTML = `To: <strong>${escapeHtml(contactName || 'Current chat')}</strong>`;
+      statusEl.textContent = '';
+      statusEl.className = 'wa-sched-status';
+
+      // If footer composer has text draft, import it
+      const composer = findComposer();
+      const draftText = composer ? readEditor(composer) : '';
+      if (draftText && !textEl.value) {
+        textEl.value = draftText;
+      }
+
+      inChatSelectedFiles = [];
+      renderInChatFileList();
+
+      // Default time: +10 minutes
+      const defTime = new Date(Date.now() + 10 * 60 * 1000);
+      setInChatDateTime(defTime);
+
+      overlay.classList.add('active');
+      setTimeout(() => {
+        try { textEl.focus(); } catch (_) {}
+      }, 100);
+    } catch (err) {
+      console.error('[WA Scheduler] Error opening in-chat modal:', err);
+      debugLog('INCHAT_MODAL_ERROR', { error: err?.message || String(err) });
+    }
+  }
+
+  function attachInChatButton() {
+    const main = document.querySelector('#main');
+    if (!main || !visible(main)) return;
+    const footer = main.querySelector('footer');
+    if (!footer || !visible(footer)) return;
+
+    if (footer.querySelector(`#${INCHAT_BTN_ID}`)) return;
+
+    injectInChatStyles();
+
+    const btn = document.createElement('button');
+    btn.id = INCHAT_BTN_ID;
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Schedule message');
+    btn.setAttribute('title', 'Schedule message for this chat');
+    btn.setAttribute('data-wa-sched-ui', 'true');
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9.5"></circle>
+        <polyline points="12 6.5 12 12 15.5 14"></polyline>
+      </svg>
+    `;
+
+    const handleOpen = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openInChatModal();
+    };
+
+    btn.addEventListener('click', handleOpen);
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+
+    // Find mic / PTT button or right button group
+    const micOrSend = footer.querySelector('[data-icon="ptt"], [data-icon="mic"], [data-icon="wds-ic-mic-filled"], [data-icon="wds-ic-mic"], [data-testid*="ptt" i], [aria-label*="voice" i], [aria-label*="audio" i], [data-icon="send"], [data-icon="wds-ic-send-filled"], button[aria-label="Send"]');
+    if (micOrSend) {
+      const btnWrapper = micOrSend.closest('button, [role="button"]') || micOrSend;
+      btnWrapper.parentElement.insertBefore(btn, btnWrapper);
+    } else {
+      footer.appendChild(btn);
+    }
+  }
+
+  // Observe chat footer to keep in-chat button attached
+  const footerObserver = new MutationObserver(() => {
+    try { attachInChatButton(); } catch (_) {}
+  });
+  footerObserver.observe(document.body, { childList: true, subtree: true });
+  setInterval(() => {
+    try { attachInChatButton(); } catch (_) {}
+  }, 1000);
+
+  // ==========================================
+  // INITIALIZATION
+  // ==========================================
 
   debugLog('CONTENT_SCRIPT_READY', { href: location.href, title: document.title, version:EXTENSION_VERSION });
 })();
