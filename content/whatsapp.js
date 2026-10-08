@@ -841,9 +841,6 @@
     const footer = main?.querySelector('footer');
     if (!main || !visible(main)) return null;
 
-    // NEVER use generic text matching here. A broad "video"/"photo" match
-    // can click the header's Video call button. Only accept known attachment
-    // controls or a button containing an attachment icon.
     const selectors = [
       'footer button[aria-label="Attach"]',
       'footer [role="button"][aria-label="Attach"]',
@@ -852,7 +849,13 @@
       'footer [data-testid="clip"]',
       'footer [data-testid="attach"]',
       'footer [data-icon="attach"]',
-      'footer [data-icon="attach-menu-plus"]'
+      'footer [data-icon="attach-menu-plus"]',
+      'footer [data-icon="plus"]',
+      'footer [data-icon="plus-rounded"]',
+      'footer [data-icon="wds-ic-plus"]',
+      'footer [data-testid="plus"]',
+      'footer [data-icon*="plus" i]',
+      'footer [data-icon*="attach" i]'
     ];
 
     for (const selector of selectors) {
@@ -867,11 +870,33 @@
       const meta = clean([
         icon.getAttribute('aria-label'), icon.getAttribute('title'), icon.getAttribute('data-icon')
       ].filter(Boolean).join(' ')).toLowerCase();
-      if (!/attach|paperclip/.test(meta)) continue;
+      if (!/attach|paperclip|plus/.test(meta)) continue;
       const button = icon.closest('button,[role="button"]');
       if (button && visible(button) && !isCallControl(button)) return button;
     }
     return null;
+  }
+
+  function assignFilesToInput(input, files) {
+    if (!input || !files?.length) return false;
+    try { input.value = ''; } catch (_) {}
+    const transfer = new DataTransfer();
+    for (const file of files) transfer.items.add(file);
+
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files');
+      if (descriptor?.set) {
+        descriptor.set.call(input, transfer.files);
+      } else {
+        input.files = transfer.files;
+      }
+    } catch (_) {
+      try { input.files = transfer.files; } catch (_) {}
+    }
+
+    try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
+    try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+    return true;
   }
 
   const MIME_EXT_MAP = {
@@ -991,13 +1016,6 @@
     if (expectedHash && actualHash !== expectedHash) {
       throw new Error(`Attachment content mismatch for ${meta.name}: expected original SHA-256 ${expectedHash}, got ${actualHash}.`);
     }
-    // WhatsApp's Document composer can reject a file before upload based on
-    // the browser MIME classification (for example an image/jpeg or text/csv
-    // assigned to the document input).  For exact-byte document delivery, the
-    // MIME label is metadata; the bytes and filename are what must be preserved.
-    // Present the exact same bytes/name as a generic document while retaining
-    // the original MIME in diagnostics. This avoids WhatsApp routing the file
-    // back through a media-specific validator.
     const originalType = meta.type || '';
     const uploadType = inferMimeType(meta.name, originalType);
     const file = new File([blob], meta.name, { type: uploadType, lastModified });
@@ -1104,7 +1122,14 @@
     const main = document.querySelector('#main');
     const footer = main?.querySelector('footer');
     const app = document.querySelector('#app');
-    const targets = [footer, main, app, document.body].filter(Boolean).filter(visible);
+    const targets = [
+      document.querySelector('[data-testid="conversation-panel-messages"]'),
+      document.querySelector('#main .copyable-area'),
+      footer,
+      main,
+      app,
+      document.body
+    ].filter(Boolean).filter(visible);
     if (!targets.length) return false;
 
     const before = captureAttachmentState(files);
@@ -1244,13 +1269,7 @@
       });
 
       try {
-        try { input.value = ''; } catch (_) {}
-        const transfer = new DataTransfer();
-        for (const file of files) transfer.items.add(file);
-        input.files = transfer.files;
-
-        try { input.dispatchEvent(new Event('input', { bubbles: true, composed: true })); } catch (_) {}
-        try { input.dispatchEvent(new Event('change', { bubbles: true, composed: true })); } catch (_) {}
+        assignFilesToInput(input, files);
 
         const assigned = [...(input.files || [])];
         if (assigned.length === files.length) {
