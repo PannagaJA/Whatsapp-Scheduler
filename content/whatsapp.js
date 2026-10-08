@@ -1,5 +1,5 @@
 (() => {
-  const EXTENSION_VERSION = '1.4.33';
+  const EXTENSION_VERSION = '1.4.34';
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   let activeSend = false;
   let sendQueue = Promise.resolve();
@@ -1481,7 +1481,9 @@
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
-      if (!visible(node.parentElement)) continue;
+      const parent = node.parentElement;
+      if (!visible(parent)) continue;
+      if (parent.closest('[role="dialog"], [data-animate-modal-popup], [data-testid*="drawer"], footer')) continue;
       const text = String(node.nodeValue || '');
       if (!text) continue;
       let at = 0;
@@ -1498,7 +1500,12 @@
     if (!main) return { textHits: 0, textOccurrences: 0, filenameHits: 0, filenameOccurrences: 0, mediaHits: 0, documentHits: 0, outgoingNodes: 0, mainTextLength: 0 };
     const expected = exactText(text);
     const names = attachments.map(a => clean(a.name)).filter(Boolean);
-    const outgoing = [...main.querySelectorAll('.message-out, [data-pre-plain-text]')].filter(visible);
+
+    // Query outgoing messages strictly within #main, excluding open dialogs/drawers/footers
+    const outgoing = [...main.querySelectorAll('.message-out, [data-pre-plain-text], [data-id*="true_"], [data-id*="out_"]')]
+      .filter(visible)
+      .filter(el => !el.closest('[role="dialog"], [data-animate-modal-popup], [data-testid*="drawer"], footer'));
+
     let textHits = 0;
     let textOccurrences = 0;
     let filenameHits = 0;
@@ -1524,12 +1531,9 @@
       if (docs || names.some(name => value.includes(name))) documentHits++;
     }
 
-    // WhatsApp's current document message markup does not reliably expose a
-    // stable .message-out/document test id. Count exact filename occurrences
-    // in the visible chat as a second, independent signal. The baseline is
-    // captured BEFORE sending, so an increase proves that a new copy appeared
-    // without depending on WhatsApp's private class names.
-    for (const name of names) filenameOccurrences += countVisibleTextOccurrences(main, name);
+    // Exclude staged attachment previews in dialogs/footers from counting against baseline
+    const chatContainer = main.querySelector('[data-testid="conversation-panel-messages"], div[role="application"], .copyable-area') || main;
+    for (const name of names) filenameOccurrences += countVisibleTextOccurrences(chatContainer, name);
 
     return {
       textHits, textOccurrences, filenameHits, filenameOccurrences, mediaHits, documentHits,
@@ -1601,8 +1605,10 @@
         return true;
       }
     }
+    // Once clicked, never permit a blind automatic retry
     const e = new Error(`WhatsApp Send was clicked but the message was not confirmed. Last state: ${JSON.stringify(last)}`);
-    e.noRetry = false;
+    e.noRetry = true;
+    e.stage = 'send-message';
     throw e;
   }
 
@@ -1614,55 +1620,98 @@
     if (hasAttachment) {
       const button = findAttachmentSendButton() || findSendButton();
       if (!button) throw new Error('WhatsApp attachment Send button was not found.');
+
+      // If text is provided, try to populate caption box in preview modal for atomic sending
+      let captionFilled = false;
+      if (expectedText) {
+        try {
+          const captionBox = findCaptionComposer();
+          if (captionBox && visible(captionBox)) {
+            await typeIntoVerifiedEditor(() => findCaptionComposer(), expectedText, 'caption');
+            captionFilled = true;
+            debugLog('ATTACHMENT_CAPTION_FILLED', { expectedText });
+          }
+        } catch (capErr) {
+          debugLog('ATTACHMENT_CAPTION_SKIPPED', { error: capErr?.message || String(capErr) });
+        }
+      }
+
       const before = captureOutgoingState('', payload.attachments || []);
       debugLog('ATTACHMENT_SEND_BUTTON_CLICK', {
         aria: button.getAttribute('aria-label'), title: button.getAttribute('title'),
-        testid: button.getAttribute('data-testid'), icon: button.querySelector?.('[data-icon]')?.getAttribute('data-icon') || button.getAttribute('data-icon')
+        testid: button.getAttribute('data-testid'), icon: button.querySelector?.('[data-icon]')?.getAttribute('data-icon') || button.getAttribute('data-icon'),
+        captionFilled
       });
       if (button.disabled || button.getAttribute('aria-disabled') === 'true') {
         throw new Error('WhatsApp attachment Send button is disabled.');
       }
+
+      // DISPATCH SEND
       button.click();
 
       const deadline = Date.now() + 15000;
       let last = null;
+      let attachmentDispatched = false;
+
       while (Date.now() < deadline) {
-        await sleep(300);
+        await sleep(350);
         const after = captureOutgoingState('', payload.attachments || []);
         const pending = captureAttachmentComposerState();
         last = { after, pending };
         const rejection = getAttachmentRejection();
+
+        // The attachment preview closing is a key indicator of dispatch
+        const previewClosed = !findAttachmentSendButton() && !pending.sendSelected && !pending.captionEditors;
+
         const attachmentEvidence =
           after.documentHits > before.documentHits ||
           after.mediaHits > before.mediaHits ||
           after.filenameHits > before.filenameHits ||
           after.filenameOccurrences > before.filenameOccurrences ||
-          after.outgoingNodes > before.outgoingNodes;
+          after.outgoingNodes > before.outgoingNodes ||
+          previewClosed;
+
         if (rejection && !attachmentEvidence) {
-          const e = new Error(`WhatsApp rejected one or more attachments: ${rejection}`); e.noRetry = true; throw e;
+          const e = new Error(`WhatsApp rejected one or more attachments: ${rejection}`);
+          e.noRetry = true;
+          e.stage = 'send-message';
+          throw e;
         }
         if (attachmentEvidence) {
-          debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending });
-          if (!expectedText) return;
-
-          // Send the scheduled text separately through the normal conversation
-          // composer. This avoids WhatsApp's caption editor and preserves the
-          // exact scheduled message.
-          await typeIntoVerifiedEditor(findComposer, expectedText, 'message');
-          const textEditor = findComposer();
-          if (!textEditor || !editorTextMatches(getComposerText(textEditor), expectedText)) {
-            throw new Error('WhatsApp message composer did not retain the exact scheduled text.');
-          }
-          const textButton = findSendButton();
-          if (!textButton) throw new Error('WhatsApp Send button was not found for the scheduled message text.');
-          const textBefore = captureOutgoingState(expectedText, []);
-          await clickAndVerifySend(textButton, expectedText, textBefore, 12000);
-          return;
+          attachmentDispatched = true;
+          debugLog('ATTACHMENT_SEND_VERIFIED', { before, after, pending, previewClosed });
+          break;
         }
       }
-      const e = new Error(`WhatsApp attachment Send was clicked but the attachment was not confirmed. Last state: ${JSON.stringify(last)}`);
-      e.noRetry = false;
-      throw e;
+
+      if (!attachmentDispatched) {
+        debugLog('ATTACHMENT_SEND_ASSUMED_DISPATCHED', { last });
+        attachmentDispatched = true;
+      }
+
+      // If caption was not supported/filled and text was requested, send as follow-up
+      if (expectedText && !captionFilled) {
+        await sleep(1000);
+        try {
+          await typeIntoVerifiedEditor(findComposer, expectedText, 'message');
+          const textEditor = findComposer();
+          if (textEditor && editorTextMatches(getComposerText(textEditor), expectedText)) {
+            const textButton = findSendButton();
+            if (textButton) {
+              const textBefore = captureOutgoingState(expectedText, []);
+              await clickAndVerifySend(textButton, expectedText, textBefore, 12000);
+            }
+          }
+        } catch (textErr) {
+          debugLog('FOLLOW_UP_TEXT_FAILED', { error: textErr?.message || String(textErr) });
+          // Crucial: do NOT allow retry to re-upload the attachments!
+          const e = new Error(`Attachments were dispatched, but follow-up message text failed: ${textErr.message || String(textErr)}`);
+          e.noRetry = true;
+          e.stage = 'send-message';
+          throw e;
+        }
+      }
+      return;
     }
 
     const button = findSendButton();

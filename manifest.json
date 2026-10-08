@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp Web Scheduler",
-  "version": "1.4.33",
+  "version": "1.4.34",
   "description": "Schedule WhatsApp Web messages and attachments with contact selection and diagnostics.",
   "permissions": [
     "storage",

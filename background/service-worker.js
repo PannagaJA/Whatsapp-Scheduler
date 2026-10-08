@@ -1,8 +1,8 @@
-const CONTENT_SCRIPT_VERSION = '1.4.33';
+const CONTENT_SCRIPT_VERSION = '1.4.34';
 const ALARM_PREFIX = 'wa-schedule:';
 const RETRY_PREFIX = 'wa-retry:';
-const RETRY_LIMIT = 10;
-const RETRY_MINUTES = 1;
+const RETRY_LIMIT = 2;
+const RETRY_MINUTES = 2;
 const CHUNK_SIZE = 200 * 1024;
 
 // All WhatsApp sends are serialized per WhatsApp tab. Chrome alarms that share
@@ -280,8 +280,13 @@ async function processMessage(id) {
         nextRetryAt: null,
         processingLeaseUntil: null
       });
+      // Clean up attachment blobs now that the message is sent
+      for (const a of message.attachments || []) {
+        try { await deleteAttachment(a.id); } catch (_) {}
+      }
     } catch (error) {
-      if (error?.noRetry) {
+      const isSendStage = (error?.stage || error?.errorStage) === 'send-message';
+      if (error?.noRetry || isSendStage) {
         await updateMessage(id, {
           status: 'failed',
           error: error.message || String(error),
@@ -303,6 +308,11 @@ async function processMessage(id) {
 async function retry(id, error, stage = 'scheduler') {
   const message = await getMessage(id);
   if (!message || message.status === 'sent' || message.status === 'cancelled') return;
+  // If the send button was already interacted with, never retry automatically to prevent duplicate sending.
+  if (stage === 'send-message') {
+    await updateMessage(id, { status: 'failed', error, errorStage: stage, nextRetryAt: null, lastErrorAt: Date.now(), processingLeaseUntil: null });
+    return;
+  }
   const attempts = message.attempts || 0;
   if (attempts >= RETRY_LIMIT) {
     await updateMessage(id, { status: 'failed', error, errorStage: stage, nextRetryAt: null, lastErrorAt: Date.now(), processingLeaseUntil: null });
