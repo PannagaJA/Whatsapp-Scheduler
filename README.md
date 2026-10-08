@@ -4,11 +4,11 @@
 
 ![WhatsApp Scheduler Logo](assets/logo.svg)
 
-**A secure, local-first Manifest V3 Chrome Extension to schedule WhatsApp Web messages and attachments with cryptographic file integrity verification.**
+**A secure, local-first Manifest V3 Chrome Extension to schedule WhatsApp Web messages and attachments directly from the in-chat footer or extension popup with cryptographic file integrity verification.**
 
 [![Manifest Version](https://img.shields.io/badge/Manifest-V3-brightgreen.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![Version](https://img.shields.io/badge/version-1.4.33-blue.svg)](manifest.json)
-[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-success.svg)](#privacy--security)
+[![Version](https://img.shields.io/badge/version-1.4.40-blue.svg)](manifest.json)
+[![Privacy](https://img.shields.io/badge/Privacy-100%25%20Local-success.svg)](#-privacy--security)
 [![License](https://img.shields.io/badge/license-MIT-informational.svg)](LICENSE)
 
 </div>
@@ -17,28 +17,35 @@
 
 ## 📌 Overview
 
-**WhatsApp Web Scheduler** is a lightweight, privacy-focused browser extension designed for Google Chrome, Brave, and Chromium-based browsers. It allows you to schedule messages, documents, images, and videos directly through WhatsApp Web without relying on third-party servers, external APIs, or exposing your personal WhatsApp credentials.
+**WhatsApp Web Scheduler** is a lightweight, privacy-focused browser extension designed for Google Chrome, Brave, and Chromium-based browsers. It allows you to schedule messages, documents, spreadsheets, images, and videos directly through WhatsApp Web without relying on third-party servers, external APIs, or exposing your personal WhatsApp credentials.
 
 Everything runs entirely on your local machine using Chrome's native background service worker, IndexedDB, and `chrome.alarms` scheduler.
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-- 🔒 **100% Local & Private**: No cloud backends, no telemetry, no tracking. Your contacts, messages, and files never leave your browser environment.
+- 🕒 **Native In-Chat Scheduling Button**:
+  - A sleek clock icon integrated directly into the WhatsApp Web chat footer (next to the mic/PTT button).
+  - Opens a dark-themed, glassmorphic scheduling modal right inside your active conversation.
+  - Auto-imports text drafts from your active chat composer.
+  - Quick time preset chips (`+15 min`, `+1 hr`, `+3 hrs`, `Tomorrow 9 AM`, `Tomorrow 6 PM`).
+  - Real-time attachment upload progress bar with instant confirmation toasts.
+- 🔒 **100% Local & Private**: No cloud backends, no telemetry, no tracking. Your contacts, messages, and files never leave your browser sandbox.
 - ⏰ **Reliable Background Scheduling**: Leverages `chrome.alarms` and persistent state in `chrome.storage.local` to trigger actions reliably across service worker lifecycles.
 - 📎 **Exact Attachment Preservation**:
   - Full binary preservation stored in IndexedDB.
   - Cryptographic **SHA-256 hash validation** ensures the file sent is byte-for-byte identical to the original file selected.
   - Chunked streaming pipeline for large files without memory exhaustion.
-- 🎯 **Intelligent Contact Selection**:
+- 🛡️ **UI Isolation & Guardian**: Extension UI elements (`#wa-sched-modal-root`, `#wa-sched-inchat-btn`, file pickers) are fully isolated, preventing automated send workflows from colliding with extension DOM.
+- 🎯 **Intelligent Contact Selection (Extension Popup)**:
   - Auto-detects currently open WhatsApp Web chats.
   - Real-time contact filtering from your active chat list.
   - Direct search dispatch to WhatsApp Web for unlisted contacts and groups.
 - 🔄 **Autonomous Error Recovery & Retries**:
   - Serialized FIFO dispatch queue per WhatsApp tab prevents message collisions.
-  - Automatic retry mechanism (retries every minute, up to 10 attempts) for temporary connection delays or busy composers.
-- 📊 **Diagnostics Dashboard**: Built-in diagnostics view (`debug.html`) to inspect scheduled jobs, retry counters, execution states, and diagnostic event logs.
+  - Automatic retry mechanism with exponential backoff for temporary connection delays.
+- 📊 **Diagnostics Dashboard**: Built-in diagnostics view (`options/options.html`) to inspect scheduled jobs, retry counters, execution states, and diagnostic event logs.
 
 ---
 
@@ -46,24 +53,25 @@ Everything runs entirely on your local machine using Chrome's native background 
 
 ```mermaid
 graph TD
+    subgraph WhatsApp Web Tab
+        INCHAT[In-Chat Button & Modal<br/>content/whatsapp.js] -->|Stage Attachment & Create Schedule| SW[Service Worker<br/>background/service-worker.js]
+        WA[WhatsApp Web UI]
+    end
+
     subgraph Browser Extension Context
-        UI[Popup UI<br/>popup.html / popup.js] -->|Schedule Request| SW[Service Worker<br/>background/service-worker.js]
+        POPUP[Popup UI<br/>popup.html / popup.js] -->|Schedule Request| SW
         SW -->|Stores Schedule Metadata| CS[(chrome.storage.local)]
-        SW -->|Stores File Binaries| IDB[(IndexedDB: waScheduler)]
+        SW -->|Stores Binary Buffers| IDB[(IndexedDB: waScheduler)]
         ALARM[chrome.alarms] -->|Trigger Send Time| SW
-        SW -->|Serialized Dispatch Queue| SCRIPT[Content Script<br/>content/whatsapp.js]
+        SW -->|Serialized Dispatch Queue| SCRIPT[Content Script Engine<br/>content/whatsapp.js]
     end
     
-    subgraph Web Page Context
-        SCRIPT -->|DOM Automation & File Verification| WA[WhatsApp Web<br/>web.whatsapp.com]
-    end
+    SCRIPT -->|DOM Automation & Hash Validation| WA
 ```
 
 ---
 
 ## 🚀 Installation
-
-Since this is an unpacked developer extension, you can install it in just a few steps:
 
 1. **Clone or Download the Repository**:
    ```bash
@@ -75,7 +83,7 @@ Since this is an unpacked developer extension, you can install it in just a few 
    - Toggle the **Developer mode** switch in the top-right corner.
 4. **Load the Extension**:
    - Click **Load unpacked** in the top-left corner.
-   - Select the folder containing `manifest.json`.
+   - Select the `Whatsapp-Scheduler` folder containing `manifest.json`.
 5. **Pin the Extension**:
    - Click the Extensions puzzle piece icon in your browser toolbar and pin **WhatsApp Scheduler** for quick access.
 
@@ -83,25 +91,21 @@ Since this is an unpacked developer extension, you can install it in just a few 
 
 ## 📖 Usage Guide
 
-### 1. Initial Setup
-1. Open [WhatsApp Web](https://web.whatsapp.com/) in a browser tab and log in.
-2. Keep the WhatsApp Web tab open in the background.
+### Method 1: Scheduling Directly Inside WhatsApp Web (Recommended)
+1. Open [WhatsApp Web](https://web.whatsapp.com/) and open any chat.
+2. Click the **Clock** button in the bottom chat footer (next to the voice message icon).
+3. Type your scheduled message or attach files (CSVs, PDFs, images, etc.).
+4. Select the scheduled Date and Time or click a preset chip (e.g. `+15 min`, `Tomorrow 9 AM`).
+5. Click **Schedule Message**. A confirmation toast will appear.
 
-### 2. Scheduling a Message
+### Method 2: Scheduling via the Extension Popup
 1. Click the **WhatsApp Scheduler** icon in your browser toolbar.
 2. Choose your recipient:
    - Click **Use current** to automatically target the active chat tab.
    - Or pick a contact from the dropdown list.
-   - Or type a contact/group name in the text field.
-3. Enter your message text (optional if sending attachments).
-4. Select any attachment files (images, PDFs, documents, audio, or video).
-5. Choose the **Date** and **Time** for scheduled delivery.
-6. Click **Schedule message**.
-
-### 3. Managing Scheduled Messages
-- View all pending, active, and completed messages directly in the popup interface.
-- Open **Diagnostics** (`debug.html`) to view queue states, execution logs, and granular status updates.
-- Remove or cancel scheduled jobs at any time before dispatch.
+   - Or type a contact/group name in the search field.
+3. Enter your message text and attach any files.
+4. Set the **Date** and **Time**, then click **Schedule message**.
 
 ---
 
@@ -111,21 +115,23 @@ Since this is an unpacked developer extension, you can install it in just a few 
 Whatsapp-Scheduler/
 ├── assets/                  # Extension icons and visual assets
 │   ├── icon16.png
+│   ├── icon32.png
 │   ├── icon48.png
 │   ├── icon128.png
 │   └── logo.svg
 ├── background/              # Background execution engine
-│   └── service-worker.js    # Chrome MV3 Service Worker (alarms, queue, IndexedDB)
-├── content/                 # WhatsApp Web DOM automation
-│   └── whatsapp.js          # Content script interacting with WhatsApp Web UI
+│   └── service-worker.js    # Chrome MV3 Service Worker (alarms, queue, IndexedDB staging)
+├── content/                 # WhatsApp Web DOM automation & in-chat modal
+│   └── whatsapp.js          # In-chat button, modal UI, debounced observer & automated sender
 ├── popup/                   # Extension popup interface
 │   ├── popup.html
 │   ├── popup.css
 │   └── popup.js
-├── options/                 # Extension configuration page
-│   └── options.html
-├── debug.html               # Live diagnostics & inspection dashboard
-├── debug.js                 # Diagnostics log reader and controller
+├── options/                 # Extension configuration and diagnostics
+│   ├── options.html
+│   ├── options.css
+│   └── options.js
+├── backups/                 # Versioned snapshots & backups
 ├── manifest.json            # Extension configuration (Manifest V3)
 ├── .gitignore               # Git ignored patterns
 └── README.md                # Project documentation
@@ -137,19 +143,19 @@ Whatsapp-Scheduler/
 
 | Attachment Type | Handling Strategy | Integrity Guarantee |
 | :--- | :--- | :--- |
-| **Documents / Files** (.pdf, .zip, .docx, etc.) | Raw binary streaming | Full SHA-256 byte-for-byte preservation |
+| **Documents / Data Files** (.csv, .pdf, .zip, .docx, etc.) | Raw binary streaming | Full SHA-256 byte-for-byte preservation |
 | **Media Attachments** (.png, .jpg, .mp4, etc.) | WhatsApp Media Composer / File Picker | Extension verifies original binary before handover; server-side compression by WhatsApp may apply depending on upload mode |
 
 > [!NOTE]
-> For byte-for-byte exact preservation of images and videos without WhatsApp's automatic server-side compression, send them as documents rather than media files.
+> For byte-for-byte exact preservation of images and videos without WhatsApp's automatic compression, attach them as documents.
 
 ---
 
-## ⚙️ Prerequisites & Operating Considerations
+## ⚙️ Operating Considerations
 
 - **Browser Running**: The browser must be open and the computer active (not suspended/sleeping) at the scheduled send time for the alarm to trigger.
 - **WhatsApp Web Logged In**: An active, authenticated session on `web.whatsapp.com` must exist.
-- **UI Updates**: WhatsApp Web periodically updates its DOM structure. If changes occur, selectors in [`content/whatsapp.js`](content/whatsapp.js) are designed with fallback selector trees to maximize resilience.
+- **Tab Persistence**: Keep at least one WhatsApp Web tab open in the browser.
 
 ---
 
@@ -157,19 +163,7 @@ Whatsapp-Scheduler/
 
 - **Zero External Calls**: This extension makes no outbound network requests other than standard Chrome extension messaging within your own browser tabs.
 - **No Third-Party Analytics**: No telemetry, tracking pixels, or remote SDKs are embedded.
-- **Encrypted Local Storage**: Data stays strictly within your browser's private extension sandbox (`chrome.storage.local` and `IndexedDB`).
-
----
-
-## 🤝 Contributing
-
-Contributions, bug reports, and feature requests are welcome!
-
-1. Fork the project
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **Sandboxed Local Storage**: Data stays strictly within your browser's private extension sandbox (`chrome.storage.local` and `IndexedDB`).
 
 ---
 
