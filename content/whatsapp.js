@@ -580,6 +580,16 @@
     const side = document.querySelector('#side') || document.querySelector('#pane-side') || document.body;
     if (!side) return null;
 
+    // 1. Direct search on title nodes in sidebar / search results
+    const titleNodes = [...side.querySelectorAll('span[title], [title]')].filter(visible);
+    for (const node of titleNodes) {
+      const title = clean(node.getAttribute('title'));
+      if (title && contactsMatch(title, name)) {
+        return node.closest('[role="listitem"], [role="row"], [role="button"], [data-testid*="cell-frame"], div[tabindex]') || node;
+      }
+    }
+
+    // 2. Search through chat rows
     const rows = getChatRows();
     for (const row of rows) {
       const rowName = extractRowContactName(row);
@@ -587,14 +597,38 @@
         return row;
       }
     }
+
+    // 3. Search through aria-labels
+    const ariaNodes = [...side.querySelectorAll('[aria-label]')].filter(visible);
+    for (const node of ariaNodes) {
+      const aria = clean(node.getAttribute('aria-label'));
+      const firstSegment = aria.split(',')[0].trim();
+      if (firstSegment && contactsMatch(firstSegment, name)) {
+        return node.closest('[role="listitem"], [role="row"], [role="button"], [data-testid*="cell-frame"], div[tabindex]') || node;
+      }
+    }
+
     return null;
   }
 
-  function clickChatRow(name) {
-    const row = findSidebarResult(name);
-    if (!row) return false;
-    row.scrollIntoView({ block: 'center' });
-    clickLikeUser(row);
+  function clickChatRow(rowOrElement) {
+    if (!rowOrElement) return false;
+    const target = typeof rowOrElement === 'string' ? findSidebarResult(rowOrElement) : rowOrElement;
+    if (!target) return false;
+
+    try { target.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (_) {}
+
+    const interactiveTargets = [
+      target.querySelector?.('[role="button"]'),
+      target.querySelector?.('[data-testid*="cell-frame"]'),
+      target.querySelector?.('span[title]'),
+      target.querySelector?.('div[tabindex]'),
+      target
+    ].filter(Boolean);
+
+    for (const el of interactiveTargets) {
+      clickLikeUser(el);
+    }
     return true;
   }
 
@@ -623,11 +657,13 @@
     }
 
     let opened = false;
+    let targetRow = findSidebarResult(name);
+
     // Step 1: Check if the contact row is directly visible in the left sidebar list
-    if (clickChatRow(name)) {
+    if (targetRow && clickChatRow(targetRow)) {
       debugLog('OPEN_CONTACT_VISIBLE_CHAT_CLICKED', { name });
       try {
-        await waitForHeader(name, 3500);
+        await waitForHeader(name, 3500, targetRow);
         await waitForMainPane(3500);
         opened = true;
       } catch (_) {
@@ -645,27 +681,19 @@
       await sleep(1800);
 
       // Search results have populated; search rows for exact contact match
-      let clickedInSearch = clickChatRow(name);
-      if (!clickedInSearch) {
-        const rows = getChatRows();
-        for (const row of rows) {
-          const rowName = extractRowContactName(row);
-          if (rowName && contactsMatch(rowName, name)) {
-            row.scrollIntoView({ block: 'center' });
-            clickLikeUser(row);
-            clickedInSearch = true;
-            break;
-          }
-        }
+      targetRow = findSidebarResult(name);
+      if (targetRow) {
+        clickChatRow(targetRow);
       }
 
-      if (!clickedInSearch) {
-        // As a last fallback for search results, press Enter on the search box
-        search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
-      }
+      // Also dispatch keyboard Enter on the search box
+      const enterInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true };
+      try { search.dispatchEvent(new KeyboardEvent('keydown', enterInit)); } catch (_) {}
+      try { search.dispatchEvent(new KeyboardEvent('keypress', enterInit)); } catch (_) {}
+      try { search.dispatchEvent(new KeyboardEvent('keyup', enterInit)); } catch (_) {}
 
       // STRICT VALIDATION: Ensure the opened chat matches the requested recipient
-      await waitForHeader(name, 8000);
+      await waitForHeader(name, 10000, targetRow);
       await waitForMainPane(8000);
     }
   }
@@ -680,7 +708,7 @@
     throw new Error('WhatsApp chat pane (#main) did not open.');
   }
 
-  async function waitForHeader(expected, timeout = 7000) {
+  async function waitForHeader(expected, timeout = 10000, retryClickTarget = null) {
     const start = Date.now();
     let lastHeader = '';
     while (Date.now() - start < timeout) {
@@ -688,6 +716,11 @@
       lastHeader = current;
       const main = document.querySelector('#main');
       if (main && visible(main) && current && contactsMatch(current, expected)) return;
+
+      // Retry clicking the search result row every ~1.5s if header hasn't updated yet
+      if (retryClickTarget && (Date.now() - start) > 1500 && (Date.now() - start) % 1500 < 350) {
+        clickChatRow(retryClickTarget);
+      }
       await sleep(250);
     }
     throw new Error(`WhatsApp opened chat “${lastHeader || 'None'}” instead of requested contact “${expected}”. Send aborted to prevent wrong recipient delivery.`);
@@ -1621,9 +1654,28 @@
   function clickLikeUser(el) {
     if (!el) return;
     try { el.focus(); } catch (_) {}
-    try { el.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, composed:true, pointerType:'mouse', button:0})); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true, composed:true, view:window, button:0})); } catch (_) {}
-    try { el.dispatchEvent(new MouseEvent('mouseup', {bubbles:true, composed:true, view:window, button:0})); } catch (_) {}
+    const rect = el.getBoundingClientRect();
+    const clientX = Math.round(rect.left + Math.max(1, rect.width / 2));
+    const clientY = Math.round(rect.top + Math.max(1, rect.height / 2));
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      detail: 1,
+      screenX: window.screenX + clientX,
+      screenY: window.screenY + clientY,
+      clientX,
+      clientY,
+      button: 0,
+      buttons: 1
+    };
+
+    try { el.dispatchEvent(new PointerEvent('pointerdown', { ...eventInit, pointerType: 'mouse', isPrimary: true })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', eventInit)); } catch (_) {}
+    try { el.dispatchEvent(new PointerEvent('pointerup', { ...eventInit, pointerType: 'mouse', isPrimary: true, buttons: 0 })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', { ...eventInit, buttons: 0 })); } catch (_) {}
+    try { el.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 })); } catch (_) {}
     try { el.click(); } catch (_) {}
   }
 

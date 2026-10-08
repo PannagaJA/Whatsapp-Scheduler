@@ -17,7 +17,13 @@
   },
   "action": {
     "default_title": "WhatsApp Scheduler",
-    "default_popup": "popup/popup.html"
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon16.png",
+      "32": "assets/icon32.png",
+      "48": "assets/icon48.png",
+      "128": "assets/icon128.png"
+    }
   },
   "content_scripts": [
     {
@@ -33,6 +39,7 @@
   "options_page": "options/options.html",
   "icons": {
     "16": "assets/icon16.png",
+    "32": "assets/icon32.png",
     "48": "assets/icon48.png",
     "128": "assets/icon128.png"
   }
