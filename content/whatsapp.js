@@ -928,33 +928,52 @@
     return Array.isArray(files) && files.length > 0 && files.every(isMediaFile);
   }
 
+  function isStickerElement(el) {
+    if (!el) return false;
+    const bits = [];
+    let node = el;
+    for (let i = 0; node && i < 5; i++, node = node.parentElement) {
+      bits.push(
+        node.getAttribute?.('aria-label') || '',
+        node.getAttribute?.('title') || '',
+        node.getAttribute?.('data-testid') || '',
+        node.getAttribute?.('data-icon') || '',
+        node.className || '',
+        node.innerText || ''
+      );
+    }
+    const combined = bits.join(' ').toLowerCase();
+    return /sticker|custom-sticker|attach-sticker|create-sticker/i.test(combined);
+  }
+
   function attachmentKind(files) {
     if (areAllMediaFiles(files)) return 'media';
     return 'document';
   }
 
   function findFileInput(preferredFiles = [], kind = 'document') {
-    const inputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled);
+    const inputs = [...document.querySelectorAll('input[type="file"]')].filter(el => !el.disabled && !isStickerElement(el));
     if (!inputs.length) return null;
     const isMedia = kind === 'media' || areAllMediaFiles(preferredFiles);
     const wantedTypes = preferredFiles.map(f => String(f.type || '').toLowerCase()).filter(Boolean);
     const wantedExts = preferredFiles.map(f => { const n = String(f.name || '').toLowerCase(); return n.includes('.') ? n.slice(n.lastIndexOf('.')) : ''; }).filter(Boolean);
     const contextOf = input => {
       const bits = []; let node = input;
-      for (let i = 0; node && i < 4; i++, node = node.parentElement) bits.push(node.getAttribute?.('aria-label') || '', node.getAttribute?.('title') || '', node.getAttribute?.('data-testid') || '', node.getAttribute?.('data-icon') || '', node.innerText || '');
+      for (let i = 0; node && i < 5; i++, node = node.parentElement) bits.push(node.getAttribute?.('aria-label') || '', node.getAttribute?.('title') || '', node.getAttribute?.('data-testid') || '', node.getAttribute?.('data-icon') || '', node.innerText || '');
       return clean(bits.join(' ')).toLowerCase();
     };
     const score = input => {
+      if (isStickerElement(input)) return -99999;
       const accept = String(input.accept || '').toLowerCase();
       const mediaOnly = isMediaOnlyInput(input);
       const context = contextOf(input);
       let s = 0;
-      if (/sticker|emoji|gif sticker/.test(context) || /sticker/.test(accept)) s -= 15000;
+      if (/sticker|emoji|gif sticker/.test(context) || /sticker/.test(accept)) return -99999;
       if (/profile|avatar|status/.test(context)) s -= 5000;
       if (input.multiple) s += 50;
 
       if (isMedia) {
-        if (/photos?\s*(and|&)\s*videos?|media|camera|gallery/.test(context)) s += 3000;
+        if (/photos?\s*(and|&)\s*videos?|media|gallery/.test(context)) s += 5000;
         if (/image\/\*|video\/\*/.test(accept)) s += 4000;
         if (accept.includes('image/') || accept.includes('video/')) s += 2000;
       } else {
@@ -973,11 +992,10 @@
       for (const ext of wantedExts) if (accept.includes(ext)) s += 350;
       return s;
     };
-    const ranked = inputs.map(input => ({ input, score: score(input), accept: input.accept, context: contextOf(input) })).sort((a,b)=>b.score-a.score);
+    const ranked = inputs.map(input => ({ input, score: score(input), accept: input.accept, context: contextOf(input) })).filter(x => x.score > -10000).sort((a,b)=>b.score-a.score);
     debugLog('ATTACHMENT_INPUT_CANDIDATES', ranked.slice(0,10).map(x=>({score:x.score,accept:x.accept,multiple:x.input.multiple,visible:visible(x.input),context:x.context.slice(0,180)})));
     const best = ranked[0];
-    if (isMedia) return best?.input || null;
-    return (best && best.score > -10000) ? best.input : null;
+    return best?.input || null;
   }
 
   async function sha256Hex(input) {
@@ -1045,6 +1063,9 @@
       // Skip elements that are inside the message list in #main to avoid matching old chat messages
       if (el.closest('.message-in, .message-out, [data-pre-plain-text]')) continue;
 
+      // STRICTLY REJECT sticker elements
+      if (isStickerElement(el)) continue;
+
       const ownText = clean(el.innerText || el.textContent || '');
       const aria = clean(el.getAttribute('aria-label') || '');
       const title = clean(el.getAttribute('title') || '');
@@ -1067,13 +1088,13 @@
 
       if (score > 0) {
         const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li, label') || el;
-        if (seen.has(clickable)) continue;
+        if (seen.has(clickable) || isStickerElement(clickable)) continue;
         seen.add(clickable);
 
         const directInput = clickable.querySelector?.('input[type="file"]') ||
                             el.querySelector?.('input[type="file"]') ||
                             clickable.parentElement?.querySelector?.('input[type="file"]');
-        if (directInput) score += 2000;
+        if (directInput && !isStickerElement(directInput)) score += 2000;
 
         candidates.push({ el: clickable, input: directInput, score, text: ownText, aria, testid });
       }
@@ -1100,7 +1121,7 @@
   }
 
   function rankDocumentInput(inputs) {
-    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file' && !isMediaOnlyInput(el)).map(input => {
+    const ranked = inputs.filter(el => el && !el.disabled && el.type === 'file' && !isMediaOnlyInput(el) && !isStickerElement(el)).map(input => {
       const accept = String(input.accept || '').toLowerCase();
       const context = clean([
         input.getAttribute('aria-label'), input.getAttribute('title'), input.getAttribute('data-testid'),
