@@ -1338,50 +1338,33 @@
   }
 
   function findCaptionComposer() {
-    const main = document.querySelector('#main');
-    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    const scopes = [...dialogs, ...(main && visible(main) ? [main] : [])];
+    const dialogs = [...document.querySelectorAll('[role="dialog"], [data-animate-modal-popup], [data-testid*="popup" i], [data-testid*="drawer" i]')].filter(visible);
+    if (!dialogs.length) return null;
+
     const candidates = [];
     const seen = new Set();
 
-    for (const scope of scopes) {
+    for (const scope of dialogs) {
       for (const el of scope.querySelectorAll('[contenteditable="true"],[contenteditable="plaintext-only"],textarea')) {
-        if (seen.has(el) || !visible(el)) continue;
+        if (seen.has(el) || !visible(el) || el.closest('footer')) continue;
         seen.add(el);
         const meta = clean([
           el.getAttribute('aria-label'), el.getAttribute('data-placeholder'),
           el.getAttribute('placeholder'), el.getAttribute('data-testid'),
           el.getAttribute('data-tab')
         ].filter(Boolean).join(' ')).toLowerCase();
-        const r = el.getBoundingClientRect();
-        let score = 0;
-        const container = el.closest('[role="dialog"]') || el.parentElement;
-        const containerText = clean(container?.innerText || '').toLowerCase();
-        if (el.closest('[role="dialog"]')) score += 1800;
+        let score = 1000;
         if (/caption|add a caption/.test(meta)) score += 2000;
-        if (/caption|add a caption/.test(containerText)) score += 700;
-        if (/type a message|message/.test(meta)) score += 500;
-        if (el.getAttribute('contenteditable')) score += 250;
-        if (r.bottom > window.innerHeight - 220) score += 150;
-        if (main?.contains(el)) score += 100;
-        // The ordinary footer editor is a fallback only. If a dialog/caption
-        // editor exists, it must win.
-        if (el.closest('footer')) score -= 400;
-        candidates.push({ el, score, meta, dialog: !!el.closest('[role="dialog"]') });
+        candidates.push({ el, score });
       }
     }
 
     candidates.sort((a, b) => b.score - a.score);
     const best = candidates[0]?.el || null;
     debugLog(best ? 'CAPTION_COMPOSER_FOUND' : 'CAPTION_COMPOSER_NOT_FOUND', best ? {
-      score: candidates[0].score,
       aria: best.getAttribute('aria-label'),
-      placeholder: best.getAttribute('data-placeholder') || best.getAttribute('placeholder'),
-      testid: best.getAttribute('data-testid'),
-      dataTab: best.getAttribute('data-tab'),
-      inDialog: !!best.closest('[role="dialog"]'),
-      inFooter: !!best.closest('footer')
-    } : { count: candidates.length });
+      placeholder: best.getAttribute('data-placeholder') || best.getAttribute('placeholder')
+    } : { inDialogs: dialogs.length });
     return best;
   }
 
@@ -1769,17 +1752,15 @@
 
       // If caption was not supported/filled and text was requested, send as follow-up
       if (expectedText && !captionFilled) {
-        await sleep(1000);
+        await sleep(800);
         try {
-          await typeIntoVerifiedEditor(findComposer, expectedText, 'message');
-          const textEditor = findComposer();
-          if (textEditor && editorTextMatches(getComposerText(textEditor), expectedText)) {
-            const textButton = findSendButton();
-            if (textButton) {
-              const textBefore = captureOutgoingState(expectedText, []);
-              await clickAndVerifySend(textButton, expectedText, textBefore, 12000);
-            }
-          }
+          const textEditor = await waitForComposer(8000);
+          await clearAndType(textEditor, expectedText);
+          await sleep(350);
+          const textButton = findSendButton();
+          if (!textButton) throw new Error('WhatsApp Send button was not found for follow-up message.');
+          const textBefore = captureOutgoingState(expectedText, []);
+          await clickAndVerifySend(textButton, expectedText, textBefore, 12000);
         } catch (textErr) {
           debugLog('FOLLOW_UP_TEXT_FAILED', { error: textErr?.message || String(textErr) });
           // Crucial: do NOT allow retry to re-upload the attachments!
