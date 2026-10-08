@@ -978,62 +978,78 @@
     const isDoc = kind === 'document';
     const isMedia = kind === 'media';
 
-    const candidates = [];
-    const seen = new Set();
+    const scanScopes = (scopes) => {
+      const candidates = [];
+      const seen = new Set();
 
-    // Query all interactive elements across the DOM
-    const elements = document.querySelectorAll(
-      'li, button, [role="button"], [role="menuitem"], [role="option"], [data-testid*="attach" i], [data-testid*="menu" i], label, div, span'
-    );
+      for (const scope of scopes) {
+        const elements = scope.querySelectorAll(
+          'li, button, [role="button"], [role="menuitem"], [role="option"], [data-testid*="attach" i], label, div, span'
+        );
 
-    for (const el of elements) {
-      if (!visible(el)) continue;
+        for (const el of elements) {
+          if (!visible(el)) continue;
 
-      // Skip elements that are inside the message list in #main to avoid matching old chat messages
-      if (el.closest('.message-in, .message-out, [data-pre-plain-text]')) continue;
+          // Skip chat messages, chat history containers, and sidebar
+          if (el.closest('#main [data-testid="conversation-panel-messages"], #main .copyable-area, [data-id], .message-in, .message-out, [data-pre-plain-text], #side, #pane-side')) continue;
 
-      // STRICTLY REJECT sticker elements
-      if (isStickerElement(el)) continue;
+          // STRICTLY REJECT sticker elements
+          if (isStickerElement(el)) continue;
 
-      const ownText = clean(el.innerText || el.textContent || '');
-      const aria = clean(el.getAttribute('aria-label') || '');
-      const title = clean(el.getAttribute('title') || '');
-      const testid = clean(el.getAttribute('data-testid') || '');
-      const icon = clean(el.getAttribute('data-icon') || el.querySelector?.('[data-icon]')?.getAttribute('data-icon') || '');
+          const ownText = clean(el.innerText || el.textContent || '');
+          const aria = clean(el.getAttribute('aria-label') || '');
+          const title = clean(el.getAttribute('title') || '');
+          const testid = clean(el.getAttribute('data-testid') || '');
+          const icon = clean(el.getAttribute('data-icon') || el.querySelector?.('[data-icon]')?.getAttribute('data-icon') || '');
 
-      let score = 0;
-      if (isDoc) {
-        if (/^document$/i.test(ownText)) score += 6000;
-        else if (/^document$/i.test(aria) || /^document$/i.test(title)) score += 5500;
-        else if (/documents?$/i.test(ownText) && ownText.length < 20) score += 4000;
-        else if (/\bdocument\b/i.test(ownText) && ownText.length < 30) score += 3000;
-        else if (/attach-document|document/i.test(`${icon} ${testid}`)) score += 3500;
-      } else if (isMedia) {
-        if (/^photos?\s*(&|and)\s*videos?$/i.test(ownText) || /^photos?$/i.test(ownText)) score += 6000;
-        else if (/photos?\s*(&|and)\s*videos?/i.test(aria) || /photos?\s*(&|and)\s*videos?/i.test(title)) score += 5500;
-        else if (/\b(photos?|gallery|media)\b/i.test(ownText) && ownText.length < 30) score += 3000;
-        else if (/image|photo|gallery|attach-image/i.test(`${icon} ${testid}`)) score += 3500;
+          let score = 0;
+          if (isDoc) {
+            if (/^documents?$/i.test(ownText)) score += 6000;
+            else if (/^documents?$/i.test(aria) || /^documents?$/i.test(title)) score += 5500;
+            else if (/attach-document|document/i.test(`${icon} ${testid}`)) score += 4000;
+            else if (/^document\b/i.test(ownText) && ownText.length < 15) score += 3000;
+          } else if (isMedia) {
+            if (/^photos?\s*(&|and)\s*videos?$/i.test(ownText) || /^photos?$/i.test(ownText)) score += 6000;
+            else if (/photos?\s*(&|and)\s*videos?/i.test(aria) || /photos?\s*(&|and)\s*videos?/i.test(title)) score += 5500;
+            else if (/image|photo|gallery|attach-image/i.test(`${icon} ${testid}`)) score += 4000;
+            else if (/\b(photos?|gallery|media)\b/i.test(ownText) && ownText.length < 20) score += 3000;
+          }
+
+          if (score > 0) {
+            const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li, label') || el;
+            if (seen.has(clickable) || isStickerElement(clickable)) continue;
+            seen.add(clickable);
+
+            const directInput = clickable.querySelector?.('input[type="file"]') ||
+                                el.querySelector?.('input[type="file"]') ||
+                                clickable.parentElement?.querySelector?.('input[type="file"]');
+            if (directInput && !isStickerElement(directInput)) score += 2000;
+
+            candidates.push({ el: clickable, input: directInput, score, text: ownText, aria, testid, icon });
+          }
+        }
       }
 
-      if (score > 0) {
-        const clickable = el.closest('button, [role="button"], [role="menuitem"], [role="option"], li, label') || el;
-        if (seen.has(clickable) || isStickerElement(clickable)) continue;
-        seen.add(clickable);
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates;
+    };
 
-        const directInput = clickable.querySelector?.('input[type="file"]') ||
-                            el.querySelector?.('input[type="file"]') ||
-                            clickable.parentElement?.querySelector?.('input[type="file"]');
-        if (directInput && !isStickerElement(directInput)) score += 2000;
+    const menuScopes = [
+      ...document.querySelectorAll('[role="menu"], [role="listbox"], [data-animate-dropdown-item], [data-testid*="menu" i], [data-testid*="dropdown" i]'),
+      document.querySelector('footer')
+    ].filter(Boolean).filter(visible);
 
-        candidates.push({ el: clickable, input: directInput, score, text: ownText, aria, testid });
-      }
+    let candidates = scanScopes(menuScopes.length ? menuScopes : [document.body]);
+
+    // If no candidates found in menuScopes, trigger fallback scan over document.body
+    if (!candidates.length && menuScopes.length > 0) {
+      candidates = scanScopes([document.body]);
     }
 
-    candidates.sort((a, b) => b.score - a.score);
     debugLog('ATTACH_MENU_ITEM_SEARCH', {
       kind,
       found: candidates.length,
-      top: candidates.slice(0, 5).map(c => ({ score: c.score, text: c.text, aria: c.aria, tag: c.el?.tagName, hasInput: !!c.input }))
+      top: candidates.slice(0, 5).map(c => ({ score: c.score, text: c.text, aria: c.aria, icon: c.icon, tag: c.el?.tagName, hasInput: !!c.input }))
     });
 
     return candidates[0] || null;
