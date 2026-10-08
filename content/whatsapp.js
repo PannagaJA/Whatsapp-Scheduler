@@ -98,8 +98,13 @@
   function getChatRows() {
     const roots = [
       '#pane-side [role="listitem"]',
+      '#pane-side [role="row"]',
       '#pane-side [aria-label][role="button"]',
-      '#pane-side div[tabindex="-1"]'
+      '#pane-side div[tabindex="-1"]',
+      '#side [role="listitem"]',
+      '#side [role="row"]',
+      '#side [aria-label][role="button"]',
+      '#side div[tabindex="-1"]'
     ];
 
     const rows = [];
@@ -120,22 +125,8 @@
     const seen = new Set();
 
     for (const row of getChatRows()) {
-      let name = '';
-      const titleNodes = [...row.querySelectorAll('span[title], [title]')];
-      const titleNode = titleNodes.find(n => clean(n.getAttribute('title')));
-      if (titleNode) name = clean(titleNode.getAttribute('title'));
-
-      if (!name) {
-        const aria = clean(row.getAttribute('aria-label'));
-        if (aria) name = aria.split(',')[0].trim();
-      }
-
-      if (!name) {
-        const lines = (row.innerText || '').split('\n').map(clean).filter(Boolean);
-        name = lines[0] || '';
-      }
-
-      if (!name || name.length > 120) continue;
+      const name = extractRowContactName(row);
+      if (!name || name.length > 120 || GENERIC_LABELS.has(name.toLowerCase())) continue;
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -524,45 +515,101 @@
     throw e;
   }
 
+  function normalizeContactString(s) {
+    return clean(s)
+      .replace(/\s*\(you\)\s*$/i, '')
+      .replace(/^message yourself$/i, '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  function contactsMatch(a, b) {
+    const normA = normalizeContactString(a);
+    const normB = normalizeContactString(b);
+    if (!normA || !normB) return false;
+
+    // Strict exact name match (ignoring case and whitespace)
+    if (normA === normB) return true;
+
+    // Phone number comparison (normalizing non-digits)
+    const digitsA = normA.replace(/\D/g, '');
+    const digitsB = normB.replace(/\D/g, '');
+    if (digitsA.length >= 7 && digitsB.length >= 7) {
+      if (digitsA === digitsB) return true;
+      // Handle country codes (e.g., +919741405534 vs 9741405534)
+      if (digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA)) {
+        const minLen = Math.min(digitsA.length, digitsB.length);
+        if (minLen >= 10) return true;
+      }
+    }
+
+    return false;
+  }
+
+  function extractRowContactName(row) {
+    if (!row) return '';
+    // 1. Prefer explicit title attribute on child spans
+    const titleNodes = [...row.querySelectorAll('span[title], [title]')];
+    for (const n of titleNodes) {
+      const t = clean(n.getAttribute('title'));
+      if (t && !GENERIC_LABELS.has(t.toLowerCase()) && !/^\d{1,2}:\d{2}/.test(t)) return t;
+    }
+
+    // 2. Inspect aria-label (WhatsApp formats chat rows as: "Contact Name, timestamp, last message...")
+    const aria = clean(row.getAttribute('aria-label'));
+    if (aria) {
+      const firstSegment = aria.split(',')[0].trim();
+      if (firstSegment && !GENERIC_LABELS.has(firstSegment.toLowerCase()) && !/unread/i.test(firstSegment)) {
+        return firstSegment;
+      }
+    }
+
+    // 3. Fallback to the first non-empty text line
+    const lines = (row.innerText || '').split('\n').map(clean).filter(Boolean);
+    for (const line of lines) {
+      if (line && !GENERIC_LABELS.has(line.toLowerCase()) && !/^\d{1,2}:\d{2}/.test(line) && !/unread/i.test(line)) {
+        return line;
+      }
+    }
+
+    return '';
+  }
+
   function findSidebarResult(name) {
-    const side = document.querySelector('#side') || document.querySelector('#pane-side');
+    const side = document.querySelector('#side') || document.querySelector('#pane-side') || document.body;
     if (!side) return null;
-    const wanted = clean(name).toLowerCase();
-    const candidates = [...side.querySelectorAll('[role="listitem"],[role="option"],[data-testid*="cell-frame"],[data-testid*="chat"],div[tabindex="-1"],span[title],[title]')]
-      .filter(visible);
-    const scored = candidates.map(el => {
-      const title = clean(el.getAttribute('title'));
-      const aria = clean(el.getAttribute('aria-label'));
-      const text = clean(el.innerText || el.textContent);
-      const vals = [title, aria, text].filter(Boolean).map(v => v.toLowerCase());
-      let score = -1;
-      if (vals.some(v => v === wanted)) score = 100;
-      else if (vals.some(v => v.startsWith(wanted + ' ') || v.startsWith(wanted + ','))) score = 90;
-      else if (vals.some(v => v.includes(wanted))) score = 50;
-      return {el, score};
-    }).filter(x => x.score >= 0).sort((x,y) => y.score - x.score);
-    if (!scored.length) return null;
-    return scored[0].el.closest('[role="listitem"],[role="option"],[data-testid*="cell-frame"],[data-testid*="chat"]') || scored[0].el;
+
+    const rows = getChatRows();
+    for (const row of rows) {
+      const rowName = extractRowContactName(row);
+      if (rowName && contactsMatch(rowName, name)) {
+        return row;
+      }
+    }
+    return null;
   }
 
   function clickChatRow(name) {
     const row = findSidebarResult(name);
     if (!row) return false;
-    row.scrollIntoView({block:'center'});
-    row.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,view:window}));
-    row.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,view:window}));
-    row.click();
+    row.scrollIntoView({ block: 'center' });
+    clickLikeUser(row);
     return true;
   }
 
   async function openContact(contact) {
     const name = clean(contact?.name);
-    if (!name) throw new Error('Recipient name is empty.');
-    debugLog('OPEN_CONTACT', { name, current: getHeaderTitle() });
+    if (!name) throw new Error('Recipient contact name is empty.');
+    debugLog('OPEN_CONTACT', { name, currentHeader: getHeaderTitle() });
+
     const current = clean(getHeaderTitle());
     const currentGeneric = !current || GENERIC_LABELS.has(current.toLowerCase()) || /^(profile details|contact info|conversation info)$/i.test(current);
-    if (!currentGeneric && (current.toLowerCase() === name.toLowerCase() || current.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(current.toLowerCase()))) {
+
+    // If the exact contact is ALREADY open, do not re-navigate
+    if (!currentGeneric && contactsMatch(current, name)) {
       if (document.querySelector('#main') && visible(document.querySelector('#main'))) {
+        debugLog('OPEN_CONTACT_ALREADY_OPEN', { name, current });
         return;
       }
     }
@@ -576,38 +623,48 @@
     }
 
     let opened = false;
+    // Step 1: Check if the contact row is directly visible in the left sidebar list
     if (clickChatRow(name)) {
-      debugLog('OPEN_CONTACT_VISIBLE_CHAT', { name });
+      debugLog('OPEN_CONTACT_VISIBLE_CHAT_CLICKED', { name });
       try {
         await waitForHeader(name, 3500);
         await waitForMainPane(3500);
         opened = true;
       } catch (_) {
-        debugLog('OPEN_CONTACT_VISIBLE_CHAT_FAILED', { name });
+        debugLog('OPEN_CONTACT_VISIBLE_CHAT_MISMATCH', { name, header: getHeaderTitle() });
       }
     }
 
+    // Step 2: Use search box to locate the exact recipient
     if (!opened) {
       const search = findSearchBox();
       if (!search) throw new Error('Recipient search box not found in WhatsApp sidebar.');
-      debugLog('OPEN_CONTACT_RECIPIENT_SEARCH', {
-        name,
-        tag: search.tagName,
-        placeholder: search.getAttribute('placeholder') || search.getAttribute('data-placeholder'),
-        aria: search.getAttribute('aria-label')
-      });
-      await clearAndType(search, name);
-      await sleep(1500);
+      debugLog('OPEN_CONTACT_RECIPIENT_SEARCH', { name });
 
-      if (!clickChatRow(name)) {
-        const result = findSidebarResult(name);
-        if (result) {
-          result.click();
-        } else {
-          search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+      await clearAndType(search, name);
+      await sleep(1800);
+
+      // Search results have populated; search rows for exact contact match
+      let clickedInSearch = clickChatRow(name);
+      if (!clickedInSearch) {
+        const rows = getChatRows();
+        for (const row of rows) {
+          const rowName = extractRowContactName(row);
+          if (rowName && contactsMatch(rowName, name)) {
+            row.scrollIntoView({ block: 'center' });
+            clickLikeUser(row);
+            clickedInSearch = true;
+            break;
+          }
         }
       }
 
+      if (!clickedInSearch) {
+        // As a last fallback for search results, press Enter on the search box
+        search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+      }
+
+      // STRICT VALIDATION: Ensure the opened chat matches the requested recipient
       await waitForHeader(name, 8000);
       await waitForMainPane(8000);
     }
@@ -624,15 +681,16 @@
   }
 
   async function waitForHeader(expected, timeout = 7000) {
-    const wanted = clean(expected).toLowerCase().replace(/\s+/g, '');
     const start = Date.now();
+    let lastHeader = '';
     while (Date.now() - start < timeout) {
-      const current = clean(getHeaderTitle()).toLowerCase().replace(/\s+/g, '');
+      const current = clean(getHeaderTitle());
+      lastHeader = current;
       const main = document.querySelector('#main');
-      if (main && visible(main) && current && (current === wanted || current.includes(wanted) || wanted.includes(current))) return;
+      if (main && visible(main) && current && contactsMatch(current, expected)) return;
       await sleep(250);
     }
-    throw new Error(`WhatsApp did not open the chat “${expected}”.`);
+    throw new Error(`WhatsApp opened chat “${lastHeader || 'None'}” instead of requested contact “${expected}”. Send aborted to prevent wrong recipient delivery.`);
   }
 
   function findComposer() {
