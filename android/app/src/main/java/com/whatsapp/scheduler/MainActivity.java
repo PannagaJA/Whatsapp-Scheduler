@@ -1,5 +1,8 @@
 package com.whatsapp.scheduler;
 
+import android.content.ClipboardManager;
+import android.content.ClipData;
+
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -109,16 +112,38 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
+                Uri uri = request.getUrl();
+                String url = uri.toString();
+                boolean isMainFrame = request.isForMainFrame();
+
                 if (url.startsWith("https://wa.me/") || url.startsWith("whatsapp://") || url.startsWith("tel:") || url.startsWith("mailto:")) {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        startActivity(intent);
-                        return true;
-                    } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "App not installed", Toast.LENGTH_SHORT).show();
+                    if (isMainFrame) {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                            startActivity(intent);
+                        } catch (Exception e) {
+                            Toast.makeText(MainActivity.this, "App not installed", Toast.LENGTH_SHORT).show();
+                        }
                     }
+                    return true;
                 }
+
+                String host = uri.getHost();
+                String appHost = Uri.parse(APP_URL).getHost();
+                if (host != null && !host.equalsIgnoreCase(appHost) && !host.equals("localhost") && !host.equals("127.0.0.1")) {
+                    if (isMainFrame) {
+                        try {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                            startActivity(intent);
+                        } catch (Exception ignored) {}
+                    }
+                    return true;
+                }
+
+                if (!isMainFrame && host != null && !host.equalsIgnoreCase(appHost) && !host.equals("localhost") && !host.equals("127.0.0.1")) {
+                    return true;
+                }
+
                 return false;
             }
 
@@ -224,6 +249,17 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public void copyToClipboard(String text) {
+            runOnUiThread(() -> {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                ClipData clip = ClipData.newPlainText("WhatsApp Code", text);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(clip);
+                    Toast.makeText(MainActivity.this, "Copied code: " + text, Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
         public void importAllContacts() {
             runOnUiThread(() -> {
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.READ_CONTACTS)

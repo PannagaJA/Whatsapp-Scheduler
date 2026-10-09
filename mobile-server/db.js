@@ -41,9 +41,13 @@ db.serialize(() => {
       name TEXT,
       phone TEXT,
       is_group INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'whatsapp',
+      name_source TEXT DEFAULT 'whatsapp',
       updated_at INTEGER NOT NULL
     )
   `);
+  try { db.run("ALTER TABLE contacts ADD COLUMN source TEXT DEFAULT 'whatsapp'", () => {}); } catch (_) {}
+  try { db.run("ALTER TABLE contacts ADD COLUMN name_source TEXT DEFAULT 'whatsapp'", () => {}); } catch (_) {}
 
   // Performance Indexes
   db.run(`CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone)`);
@@ -92,7 +96,7 @@ function all(sql, params = []) {
 }
 
 // Ultra-fast Bulk Transaction Upsert for Contacts (processes 1,000s in <20ms)
-function batchUpsertContacts(contactList) {
+function batchUpsertContacts(contactList, source = "whatsapp") {
   return new Promise((resolve, reject) => {
     if (!contactList || contactList.length === 0) return resolve(0);
 
@@ -100,15 +104,23 @@ function batchUpsertContacts(contactList) {
       db.run('BEGIN TRANSACTION');
 
       const stmt = db.prepare(`
-        INSERT INTO contacts (jid, name, phone, is_group, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO contacts (jid, name, phone, is_group, source, name_source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(jid) DO UPDATE SET
           name = CASE
-            WHEN nullif(excluded.name, '') IS NOT NULL THEN excluded.name
+            WHEN excluded.source = 'phonebook' AND nullif(excluded.name, '') IS NOT NULL THEN excluded.name
+            WHEN nullif(excluded.name, '') IS NOT NULL AND (contacts.name_source != 'phonebook' OR contacts.name IS NULL OR contacts.name = '') THEN excluded.name
             WHEN contacts.name LIKE '%@%' OR contacts.name = contacts.phone THEN ''
             ELSE contacts.name
           END,
+          name_source = CASE
+            WHEN excluded.source = 'phonebook' AND nullif(excluded.name, '') IS NOT NULL THEN 'phonebook'
+            WHEN nullif(excluded.name, '') IS NOT NULL AND (contacts.name_source != 'phonebook' OR contacts.name IS NULL OR contacts.name = '') THEN excluded.name_source
+            WHEN contacts.name LIKE '%@%' OR contacts.name = contacts.phone THEN 'whatsapp'
+            ELSE contacts.name_source
+          END,
           phone = coalesce(nullif(excluded.phone, ''), contacts.phone),
+          source = CASE WHEN excluded.source = 'phonebook' THEN 'phonebook' ELSE contacts.source END,
           updated_at = excluded.updated_at
       `);
 
@@ -123,7 +135,9 @@ function batchUpsertContacts(contactList) {
         let phone = c.phone || (isGrp ? '' : c.jid.split('@')[0].replace(/\D/g, ''));
         if (name.includes('@') || name === phone) name = '';
 
-        stmt.run([c.jid, name, phone, isGrp ? 1 : 0, now], (err) => {
+        const contactSource = c.source || source;
+        const nameSource = contactSource === "phonebook" && name ? "phonebook" : "whatsapp";
+        stmt.run([c.jid, name, phone, isGrp ? 1 : 0, contactSource, nameSource, now], (err) => {
           if (!err) count++;
         });
       }
