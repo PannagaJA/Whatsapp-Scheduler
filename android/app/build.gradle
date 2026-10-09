@@ -16,13 +16,24 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            storeFile file("app-release.jks")
+            storePassword "scheduler123"
+            keyAlias "whatsapp-scheduler"
+            keyPassword "scheduler123"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
         debug {
             debuggable true
+            signingConfig signingConfigs.release
         }
     }
 
