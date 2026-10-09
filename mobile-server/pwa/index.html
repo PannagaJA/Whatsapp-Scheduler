@@ -302,8 +302,13 @@
           <div style="font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">
             Enter Code in WhatsApp
           </div>
-          <div id="pairCodeResult" style="font-family: monospace; font-size: 26px; font-weight: 800; letter-spacing: 4px; color: #25D366; background: rgba(37,211,102,0.1); padding: 12px; border-radius: 8px; border: 1px dashed #25D366;">
-            --------
+          <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
+            <div id="pairCodeResult" style="font-family: monospace; font-size: 24px; font-weight: 800; letter-spacing: 3px; color: #25D366; background: rgba(37,211,102,0.1); padding: 10px 14px; border-radius: 8px; border: 1px dashed #25D366; flex: 1;">
+              --------
+            </div>
+            <button type="button" id="btnCopyPairCode" class="btn-primary" style="padding: 10px 14px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; height: 48px;" title="Copy Code">
+              <span>📋 Copy</span>
+            </button>
           </div>
           <p class="modal-help" style="margin-top: 12px;">
             Open WhatsApp &gt; <strong>Linked Devices</strong> &gt; <strong>Link with phone number instead</strong> &gt; Enter this code.
