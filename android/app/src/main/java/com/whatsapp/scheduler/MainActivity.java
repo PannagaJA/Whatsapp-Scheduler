@@ -279,11 +279,30 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void downloadAndInstallUpdate(final String downloadUrl) {
+            // SEC-002: Strict URL and Protocol Whitelist Check
+            if (downloadUrl == null || !downloadUrl.startsWith("https://")) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Insecure download URL.", Toast.LENGTH_LONG).show());
+                return;
+            }
+
+            try {
+                Uri parsedUri = Uri.parse(downloadUrl);
+                String host = parsedUri.getHost();
+                if (host == null || (!host.equalsIgnoreCase("github.com") && !host.endsWith(".githubusercontent.com"))) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Untrusted download source.", Toast.LENGTH_LONG).show());
+                    return;
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Invalid download URL.", Toast.LENGTH_LONG).show());
+                return;
+            }
+
             runOnUiThread(() -> {
-                Toast.makeText(MainActivity.this, "Downloading WhatsApp Scheduler update…", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "Downloading verified WhatsApp Scheduler update…", Toast.LENGTH_SHORT).show();
             });
 
             executorService.execute(() -> {
+                File apkFile = null;
                 try {
                     URL targetUrl = new URL(downloadUrl);
                     HttpURLConnection conn = (HttpURLConnection) targetUrl.openConnection();
@@ -295,13 +314,19 @@ public class MainActivity extends AppCompatActivity {
 
                     int responseCode = conn.getResponseCode();
 
-                    // Follow redirect manually if needed
+                    // Follow redirect manually if needed with strict host whitelist validation
                     if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
                         responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
                         responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
                         responseCode == 307 || responseCode == 308) {
                         String redirectUrl = conn.getHeaderField("Location");
                         if (redirectUrl != null) {
+                            Uri redirectUri = Uri.parse(redirectUrl);
+                            String redirectHost = redirectUri.getHost();
+                            if (redirectHost == null || (!redirectHost.equalsIgnoreCase("github.com") && !redirectHost.endsWith(".githubusercontent.com"))) {
+                                conn.disconnect();
+                                throw new SecurityException("Untrusted redirect host: " + redirectHost);
+                            }
                             conn.disconnect();
                             targetUrl = new URL(redirectUrl);
                             conn = (HttpURLConnection) targetUrl.openConnection();
@@ -321,7 +346,7 @@ public class MainActivity extends AppCompatActivity {
 
                     File downloadsDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
                     if (downloadsDir == null) downloadsDir = getCacheDir();
-                    final File apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
+                    apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
                     if (apkFile.exists()) apkFile.delete();
 
                     InputStream inputStream = conn.getInputStream();
@@ -338,22 +363,70 @@ public class MainActivity extends AppCompatActivity {
                     inputStream.close();
                     conn.disconnect();
 
-                    runOnUiThread(() -> triggerPackageInstaller(apkFile));
+                    // SEC-002: Programmatic Package Identity & Signature Continuity Verification
+                    final File verifiedApk = apkFile;
+                    verifyApkIntegrityAndSignatures(verifiedApk);
+
+                    runOnUiThread(() -> triggerPackageInstaller(verifiedApk));
 
                 } catch (Exception e) {
                     e.printStackTrace();
-                    final String errText = e.getMessage() != null ? e.getMessage() : "Network error";
-                    runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Update error: " + errText, Toast.LENGTH_LONG).show();
-                        try {
-                            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
-                            startActivity(browserIntent);
-                        } catch (Exception ignored) {
-                            // Fallback browser not available
-                        }
-                    });
+                    if (apkFile != null && apkFile.exists()) {
+                        apkFile.delete();
+                    }
+                    final String errText = e.getMessage() != null ? e.getMessage() : "Security verification failed";
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: " + errText, Toast.LENGTH_LONG).show());
                 }
             });
+        }
+
+        private void verifyApkIntegrityAndSignatures(File apkFile) throws SecurityException {
+            if (apkFile == null || !apkFile.exists()) {
+                throw new SecurityException("Downloaded update archive not found.");
+            }
+
+            PackageManager pm = getPackageManager();
+            PackageInfo downloadedInfo = pm.getPackageArchiveInfo(
+                    apkFile.getAbsolutePath(),
+                    PackageManager.GET_SIGNATURES | PackageManager.GET_ACTIVITIES
+            );
+
+            if (downloadedInfo == null) {
+                apkFile.delete();
+                throw new SecurityException("Downloaded archive is not a valid Android APK.");
+            }
+
+            // 1. Verify Package Name
+            if (!getPackageName().equals(downloadedInfo.packageName)) {
+                apkFile.delete();
+                throw new SecurityException("Package ID mismatch. Expected " + getPackageName() + ", got " + downloadedInfo.packageName);
+            }
+
+            // 2. Verify Signing Certificate Continuity against Current Running Installation
+            try {
+                PackageInfo currentInfo = pm.getPackageInfo(getPackageName(), PackageManager.GET_SIGNATURES);
+                if (currentInfo.signatures != null && downloadedInfo.signatures != null) {
+                    boolean signatureMatches = false;
+                    for (android.content.pm.Signature curSig : currentInfo.signatures) {
+                        for (android.content.pm.Signature downSig : downloadedInfo.signatures) {
+                            if (curSig.equals(downSig)) {
+                                signatureMatches = true;
+                                break;
+                            }
+                        }
+                        if (signatureMatches) break;
+                    }
+
+                    if (!signatureMatches) {
+                        apkFile.delete();
+                        throw new SecurityException("Signing certificate mismatch! Untrusted developer key.");
+                    }
+                }
+            } catch (PackageManager.NameNotFoundException e) {
+                // If package info cannot be queried, fail closed
+                apkFile.delete();
+                throw new SecurityException("Could not verify running application signatures.");
+            }
         }
     }
 

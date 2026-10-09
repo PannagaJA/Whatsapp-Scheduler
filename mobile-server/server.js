@@ -6,6 +6,13 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { db, run, get, all, DB_DIR } = require("./db");
 const {
+  requireAuth,
+  isSetupRequired,
+  registerUser,
+  authenticateUser,
+  deleteSession
+} = require("./auth");
+const {
   initWhatsAppEngine,
   getStatus,
   requestPairingCode,
@@ -48,8 +55,53 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "pwa")));
 
+// --- Application Authentication Routes ---
+app.get("/api/auth/setup-status", async (req, res) => {
+  try {
+    const isSetup = await isSetupRequired();
+    res.json({ success: true, setupRequired: isSetup });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await registerUser(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await authenticateUser(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(401).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", requireAuth, async (req, res) => {
+  try {
+    if (req.sessionToken) {
+      await deleteSession(req.sessionToken);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ success: true, user: req.user });
+});
+
 // Web Share Target API Endpoint (Android Native Intent Receiver)
-app.post("/share-target", upload.array("media", 10), (req, res) => {
+app.post("/share-target", requireAuth, upload.array("media", 10), (req, res) => {
   const shareId = crypto.randomUUID();
   const shareData = {
     title: req.body.title || "",
@@ -72,7 +124,7 @@ app.post("/share-target", upload.array("media", 10), (req, res) => {
 });
 
 // API: Retrieve Shared Data
-app.get("/api/shared/:shareId", (req, res) => {
+app.get("/api/shared/:shareId", requireAuth, (req, res) => {
   const shareId = req.params.shareId;
   const data = shareCache.get(shareId);
   if (data) {
@@ -131,7 +183,7 @@ app.get("/api/version", async (req, res) => {
   });
 });
 
-app.get("/api/status", async (req, res) => {
+app.get("/api/status", requireAuth, async (req, res) => {
   try {
     const status = await getStatus();
     res.json({ success: true, ...status });
@@ -141,7 +193,7 @@ app.get("/api/status", async (req, res) => {
 });
 
 // API: Dedicated QR Code Endpoint
-app.get("/api/qr", async (req, res) => {
+app.get("/api/qr", requireAuth, async (req, res) => {
   try {
     const status = await getStatus();
     res.json({ 
@@ -156,7 +208,7 @@ app.get("/api/qr", async (req, res) => {
 });
 
 // API: Request 8-digit Pairing Code (accepts phoneNumber or phone)
-app.post("/api/pair-code", async (req, res) => {
+app.post("/api/pair-code", requireAuth, async (req, res) => {
   try {
     const phoneNumber = req.body.phoneNumber || req.body.phone;
     if (!phoneNumber) {
@@ -170,7 +222,7 @@ app.post("/api/pair-code", async (req, res) => {
 });
 
 // API: Logout
-app.post("/api/logout", async (req, res) => {
+app.post("/api/logout", requireAuth, async (req, res) => {
   try {
     await logoutSession();
     res.json({ success: true });
@@ -180,7 +232,7 @@ app.post("/api/logout", async (req, res) => {
 });
 
 // API: List Contacts (Only returns contacts if phonebook is imported or groups)
-app.get("/api/contacts", async (req, res) => {
+app.get("/api/contacts", requireAuth, async (req, res) => {
   try {
     const setting = await get("SELECT value FROM settings WHERE key = 'phonebook_imported'");
     const phonebookImported = setting ? setting.value === "1" : false;
@@ -207,7 +259,7 @@ app.get("/api/contacts", async (req, res) => {
 });
 
 // API: Bulk Import Contacts (from Phonebook sync)
-app.post("/api/contacts/import", async (req, res) => {
+app.post("/api/contacts/import", requireAuth, async (req, res) => {
   try {
     const { contacts } = req.body;
     if (!Array.isArray(contacts) || contacts.length === 0) {
@@ -247,7 +299,7 @@ app.post("/api/contacts/import", async (req, res) => {
 });
 
 // API: Contact / Group Profile Picture
-app.get("/api/profile-pic", async (req, res) => {
+app.get("/api/profile-pic", requireAuth, async (req, res) => {
   try {
     const { jid } = req.query;
     if (!jid) return res.status(400).json({ success: false, url: null });
@@ -259,7 +311,7 @@ app.get("/api/profile-pic", async (req, res) => {
 });
 
 // API: List Scheduled Messages
-app.get("/api/schedules", async (req, res) => {
+app.get("/api/schedules", requireAuth, async (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   try {
     const schedules = await all(`
@@ -287,7 +339,7 @@ app.get("/api/schedules", async (req, res) => {
 });
 
 // API: Create Schedule (Supports direct JSON or Multipart file uploads)
-app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => {
+app.post("/api/schedules", requireAuth, upload.array("attachments", 10), async (req, res) => {
   try {
     const id = crypto.randomUUID();
     const rawRecipient = (req.body.recipient || "").trim();
@@ -347,7 +399,7 @@ app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => 
 });
 
 // API: Delete / Cancel Schedule
-app.delete("/api/schedules/:id", async (req, res) => {
+app.delete("/api/schedules/:id", requireAuth, async (req, res) => {
   try {
     const schedule = await get("SELECT * FROM schedules WHERE id = ?", [req.params.id]);
     if (!schedule) return res.status(404).json({ success: false, error: "Schedule not found" });
