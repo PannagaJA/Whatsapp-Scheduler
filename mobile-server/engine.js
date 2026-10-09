@@ -21,6 +21,16 @@ let sock = null;
 let currentQr = null;
 let connectionStatus = 'connecting'; // 'connecting', 'qr', 'connected', 'disconnected'
 let userProfile = null;
+let isSyncing = false;
+let syncTimeout = null;
+
+function markSyncing() {
+  isSyncing = true;
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => {
+    isSyncing = false;
+  }, 12000);
+}
 
 async function initWhatsAppEngine() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -55,6 +65,7 @@ async function initWhatsAppEngine() {
       connectionStatus = 'disconnected';
       currentQr = null;
       userProfile = null;
+      isSyncing = false;
       console.log(`[WhatsApp Engine] Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
 
       if (shouldReconnect) {
@@ -68,6 +79,7 @@ async function initWhatsAppEngine() {
       connectionStatus = 'connected';
       currentQr = null;
       userProfile = sock.user;
+      markSyncing();
       console.log(`[WhatsApp Engine] Connected successfully as: ${userProfile?.name || userProfile?.id}`);
       
       // Auto-fetch all groups and sync them into contacts table
@@ -170,6 +182,7 @@ async function initWhatsAppEngine() {
 function getStatus() {
   return {
     status: connectionStatus,
+    syncing: isSyncing,
     qr: currentQr,
     user: userProfile ? {
       id: userProfile.id,
@@ -192,6 +205,16 @@ async function requestPairingCode(phoneNumber) {
   return code;
 }
 
+async function getProfilePicture(jid) {
+  if (!sock || connectionStatus !== 'connected') return null;
+  try {
+    const url = await sock.profilePictureUrl(jid, 'preview');
+    return url;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function formatRecipientJid(recipient) {
   let target = String(recipient || '').trim();
   if (target.includes('@s.whatsapp.net') || target.includes('@g.us')) {
@@ -199,16 +222,36 @@ async function formatRecipientJid(recipient) {
   }
 
   // 1. Check if it matches a contact name in the SQLite database
-  const contact = await require('./db').get(
-    `SELECT jid FROM contacts WHERE lower(name) = lower(?) OR phone = ? LIMIT 1`,
-    [target, target.replace(/\D/g, '')]
+  let contact = await require('./db').get(
+    `SELECT jid FROM contacts WHERE lower(name) = lower(?) LIMIT 1`,
+    [target]
   );
   if (contact?.jid) return contact.jid;
 
-  // 2. Format as direct phone number
-  const digits = target.replace(/\D/g, '');
-  if (digits.length >= 7) {
-    return `${digits}@s.whatsapp.net`;
+  const rawDigits = target.replace(/\D/g, '');
+  let normalizedDigits = rawDigits;
+  if (rawDigits.length === 10) {
+    normalizedDigits = '91' + rawDigits;
+  } else if (rawDigits.length === 11 && rawDigits.startsWith('0')) {
+    normalizedDigits = '91' + rawDigits.slice(1);
+  }
+
+  // 2. Check by phone number only if digits are present
+  if (rawDigits.length > 0) {
+    contact = await require('./db').get(
+      `SELECT jid FROM contacts 
+       WHERE phone = ? 
+          OR phone = ? 
+          OR phone = ? 
+       LIMIT 1`,
+      [rawDigits, normalizedDigits, rawDigits.startsWith('91') ? rawDigits.slice(2) : rawDigits]
+    );
+    if (contact?.jid) return contact.jid;
+  }
+
+  // 3. Format as direct phone number (auto-defaults 10-digits to India +91)
+  if (normalizedDigits.length >= 7) {
+    return `${normalizedDigits}@s.whatsapp.net`;
   }
 
   throw new Error(`Could not resolve contact JID for: "${recipient}"`);
@@ -290,6 +333,7 @@ module.exports = {
   initWhatsAppEngine,
   getStatus,
   requestPairingCode,
+  getProfilePicture,
   sendWhatsAppMessage,
   logoutSession
 };

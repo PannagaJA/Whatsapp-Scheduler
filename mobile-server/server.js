@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { run, get, all, DB_DIR } = require('./db');
-const { initWhatsAppEngine, getStatus, requestPairingCode, logoutSession } = require('./engine');
+const { initWhatsAppEngine, getStatus, requestPairingCode, getProfilePicture, logoutSession } = require('./engine');
 const { startScheduler } = require('./scheduler');
 
 const app = express();
@@ -113,12 +113,24 @@ app.get('/api/contacts', async (req, res) => {
     const contacts = await all(`
       SELECT jid, coalesce(nullif(name, ''), phone, jid) as name, phone, is_group 
       FROM contacts 
-      ORDER BY is_group DESC, updated_at DESC, name ASC 
+      ORDER BY updated_at DESC, name ASC 
       LIMIT 500
     `);
     res.json({ success: true, contacts, count: contacts.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API: Contact / Group Profile Picture
+app.get('/api/profile-pic', async (req, res) => {
+  try {
+    const { jid } = req.query;
+    if (!jid) return res.status(400).json({ success: false, url: null });
+    const url = await getProfilePicture(jid);
+    res.json({ success: true, url });
+  } catch (err) {
+    res.json({ success: false, url: null });
   }
 });
 

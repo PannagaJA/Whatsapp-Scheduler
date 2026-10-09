@@ -203,27 +203,66 @@
   // Poll contacts every 10 seconds while on schedule tab
   setInterval(loadContacts, 10000);
 
+  const avatarCache = new Map();
+
+  async function loadAvatar(jid, el) {
+    if (!jid || jid.includes('@broadcast')) return;
+    if (avatarCache.has(jid)) {
+      const cached = avatarCache.get(jid);
+      if (cached && el) {
+        el.textContent = '';
+        const img = document.createElement('img');
+        img.src = cached;
+        img.alt = '';
+        el.appendChild(img);
+      }
+      return;
+    }
+    try {
+      const res = await fetch(`/api/profile-pic?jid=${encodeURIComponent(jid)}`);
+      const data = await res.json();
+      if (data?.url) {
+        avatarCache.set(jid, data.url);
+        if (el) {
+          el.textContent = '';
+          const img = document.createElement('img');
+          img.src = data.url;
+          img.alt = '';
+          el.appendChild(img);
+        }
+      }
+    } catch (_) {}
+  }
+
   function renderContactSuggestions(filter = '') {
     const q = filter.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, '');
     let matches = [];
 
     if (!q) {
-      matches = allContacts.slice(0, 8);
+      matches = allContacts.slice(0, 10);
     } else {
-      matches = allContacts.filter(c => 
-        (c.name && c.name.toLowerCase().includes(q)) || 
-        (c.phone && c.phone.includes(q))
-      ).slice(0, 8);
+      matches = allContacts.filter(c => {
+        const cName = (c.name || '').toLowerCase();
+        const cPhone = (c.phone || '').replace(/\D/g, '');
+        if (cName.includes(q)) return true;
+        if (qDigits) {
+          if (cPhone.includes(qDigits)) return true;
+          if (qDigits.length === 10 && cPhone === '91' + qDigits) return true;
+          if (cPhone.startsWith('91') && cPhone.slice(2).includes(qDigits)) return true;
+        }
+        return false;
+      }).slice(0, 10);
     }
+
+    contactsDropdown.textContent = '';
 
     if (matches.length === 0) {
       if (allContacts.length === 0) {
-        contactsDropdown.innerHTML = `
-          <div style="padding: 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
-            ⏳ WhatsApp contacts are syncing in background.<br>
-            <strong>Tip:</strong> You can type any phone number directly (e.g. <code>+919876543210</code>).
-          </div>
-        `;
+        const tipBox = document.createElement('div');
+        tipBox.style.cssText = 'padding: 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5;';
+        tipBox.innerHTML = `⏳ WhatsApp contacts are syncing in background.<br><strong>Tip:</strong> You can type any 10-digit number directly (e.g. <code>9876543210</code>).`;
+        contactsDropdown.appendChild(tipBox);
         contactsDropdown.style.display = 'block';
         return;
       }
@@ -231,23 +270,72 @@
       return;
     }
 
-    contactsDropdown.innerHTML = `
-      <div style="padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
-        <span>${q ? 'MATCHING CONTACTS' : 'RECENT CONTACTS & GROUPS'}</span>
-        <span>${allContacts.length} Synced</span>
-      </div>
-    ` + matches.map(c => `
-      <div class="suggestion-item" data-recipient="${c.name || c.phone}">
-        <span class="suggestion-name">${c.is_group ? '👥 ' : '👤 '}${c.name || c.phone}</span>
-        <span class="suggestion-phone">${c.is_group ? 'WhatsApp Group' : (c.phone ? '+' + c.phone : '')}</span>
-      </div>
-    `).join('');
+    // Header
+    const headEl = document.createElement('div');
+    headEl.style.cssText = 'padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;';
+    const headTitle = document.createElement('span');
+    headTitle.textContent = q ? 'MATCHING CONTACTS' : 'RECENT CHATS & CONTACTS';
+    const headCount = document.createElement('span');
+    headCount.textContent = `${allContacts.length} Synced`;
+    headEl.appendChild(headTitle);
+    headEl.appendChild(headCount);
+    contactsDropdown.appendChild(headEl);
 
-    contactsDropdown.querySelectorAll('.suggestion-item').forEach(item => {
+    // List items created via DOM elements
+    matches.forEach(c => {
+      const item = document.createElement('div');
+      item.className = 'suggestion-item';
+      item.setAttribute('data-recipient', c.jid || c.phone || c.name);
+
+      // Avatar
+      const avatarEl = document.createElement('div');
+      avatarEl.className = 'suggestion-avatar';
+      avatarEl.setAttribute('data-jid', c.jid || '');
+
+      const cachedUrl = c.jid ? avatarCache.get(c.jid) : null;
+      if (cachedUrl) {
+        const img = document.createElement('img');
+        img.src = cachedUrl;
+        img.alt = '';
+        avatarEl.appendChild(img);
+      } else {
+        avatarEl.textContent = c.is_group ? '👥' : '👤';
+      }
+
+      // Details
+      const detailsEl = document.createElement('div');
+      detailsEl.className = 'suggestion-details';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'suggestion-name';
+      nameEl.textContent = c.name || c.phone || c.jid;
+
+      const phoneEl = document.createElement('span');
+      phoneEl.className = 'suggestion-phone';
+      if (c.is_group) {
+        phoneEl.textContent = 'WhatsApp Group';
+      } else if (c.phone) {
+        phoneEl.textContent = c.phone.startsWith('91') ? '+91 ' + c.phone.slice(2) : '+' + c.phone;
+      } else {
+        phoneEl.textContent = '';
+      }
+
+      detailsEl.appendChild(nameEl);
+      detailsEl.appendChild(phoneEl);
+
+      item.appendChild(avatarEl);
+      item.appendChild(detailsEl);
+
       item.onclick = () => {
         recipientInput.value = item.getAttribute('data-recipient');
         contactsDropdown.style.display = 'none';
       };
+
+      contactsDropdown.appendChild(item);
+
+      if (c.jid && !avatarCache.has(c.jid)) {
+        loadAvatar(c.jid, avatarEl);
+      }
     });
 
     contactsDropdown.style.display = 'block';
@@ -391,6 +479,9 @@
 
   refreshQueueBtn.onclick = loadSchedules;
 
+  const syncBanner = document.getElementById('syncBanner');
+  const syncBannerText = document.getElementById('syncBannerText');
+
   // 10. Connection Status & Pairing
   async function checkStatus() {
     try {
@@ -398,8 +489,32 @@
       const data = await res.json();
       
       const isConn = data.status === 'connected';
+      const isSyncing = Boolean(data.syncing);
+
       headerStatus.className = `status-indicator ${data.status}`;
-      headerStatus.querySelector('.status-text').textContent = isConn ? 'Connected' : (data.status === 'qr' ? 'Scan QR' : 'Disconnected');
+      if (isConn) {
+        if (isSyncing) {
+          headerStatus.querySelector('.status-text').innerHTML = `Connected <span class="sync-spinner-inline"></span>`;
+          if (syncBanner) {
+            syncBanner.style.display = 'flex';
+            if (syncBannerText) syncBannerText.textContent = `Syncing WhatsApp contacts & chats…`;
+          }
+        } else {
+          headerStatus.querySelector('.status-text').textContent = 'Connected';
+          if (syncBanner) syncBanner.style.display = 'none';
+        }
+
+        // Auto-close QR / Pairing modal when scanned & connected
+        if (qrModal.classList.contains('active')) {
+          qrModal.classList.remove('active');
+          showToast('✓ WhatsApp Connected Successfully!');
+          const schedTab = document.querySelector('.nav-item[data-tab="paneSchedule"]');
+          if (schedTab) schedTab.click();
+        }
+      } else {
+        if (syncBanner) syncBanner.style.display = 'none';
+        headerStatus.querySelector('.status-text').textContent = data.status === 'qr' ? 'Scan QR' : 'Disconnected';
+      }
 
       devicePill.textContent = `Status: ${data.status.toUpperCase()}`;
       devicePill.style.color = isConn ? 'var(--accent)' : 'var(--warning)';
@@ -416,11 +531,13 @@
     } catch (_) {
       headerStatus.className = 'status-indicator disconnected';
       headerStatus.querySelector('.status-text').textContent = 'Server Offline';
+      if (syncBanner) syncBanner.style.display = 'none';
     }
   }
 
   checkStatus();
-  setInterval(checkStatus, 6000);
+  // Poll faster (every 2.5 seconds) for snappy QR detection and sync feedback
+  setInterval(checkStatus, 2500);
 
   // QR Modal
   showQrBtn.onclick = async () => {
