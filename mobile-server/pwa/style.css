@@ -755,8 +755,14 @@ textarea {
 }
 
 .device-status-pill {
-  font-weight: 600;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
 }
 
 .device-user-info {
@@ -764,10 +770,154 @@ textarea {
   color: var(--text-secondary);
 }
 
-.pair-methods {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.device-disconnected-guide {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.device-disconnected-guide .guide-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.device-disconnected-guide .guide-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.device-disconnected-guide .guide-steps li {
+  margin-bottom: 3px;
+}
+
+.update-card-body {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  background: var(--bg-input);
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+@media (min-width: 440px) {
+  .update-card-body {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.update-info-block {
+  flex: 1;
+}
+
+.btn-download-update {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  width: 100%;
+}
+
+@media (min-width: 440px) {
+  .btn-download-update {
+    width: auto;
+  }
+}
+
+.pair-methods-box {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.pair-methods-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-muted);
+}
+
+.pair-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.pair-method-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+}
+
+.pair-method-btn svg {
+  flex-shrink: 0;
+}
+
+.pair-method-btn span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pair-method-btn:hover,
+.pair-method-btn:active {
+  background: rgba(37, 211, 102, 0.12);
+  border-color: #25D366;
+  color: #25D366;
+}
+
+@media (min-width: 440px) {
+  .pair-methods {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .pair-method-btn {
+    font-size: 12.5px;
+    padding: 10px 8px;
+  }
 }
 
 /* Bottom Nav */
@@ -1310,4 +1460,100 @@ textarea:disabled {
   opacity: 0.45;
   pointer-events: none;
   filter: grayscale(0.5);
+}
+
+/* === WhatsApp Not Connected Card on Schedule Pane === */
+.wa-not-connected-card {
+  background: linear-gradient(135deg, rgba(234, 67, 53, 0.08), rgba(255, 107, 107, 0.12));
+  border: 1px solid rgba(234, 67, 53, 0.3);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.wa-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(234, 67, 53, 0.15);
+  color: #ff6b6b;
+}
+
+.status-pill-badge.connecting {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+}
+
+.status-pill-badge.connected {
+  background: rgba(37, 211, 102, 0.15);
+  color: #25D366;
+}
+
+.status-pill-badge .dot-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+}
+
+.btn-goto-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #25D366;
+  color: #0b141a;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(37, 211, 102, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.btn-goto-pair:active {
+  transform: scale(0.96);
+}
+
+.wa-card-guide {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wa-card-guide .guide-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wa-card-guide .guide-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.wa-card-guide .guide-steps li {
+  margin-bottom: 2px;
 }

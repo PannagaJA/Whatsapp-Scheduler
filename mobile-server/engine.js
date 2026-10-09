@@ -66,7 +66,13 @@ async function initWhatsAppEngine() {
 
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
+      const isLoggedOut = (
+        statusCode === DisconnectReason.loggedOut ||
+        statusCode === DisconnectReason.badSession ||
+        statusCode === DisconnectReason.multideviceMismatch ||
+        statusCode === 401 ||
+        statusCode === 403
+      );
       const shouldReconnect = !isLoggedOut;
       connectionStatus = shouldReconnect ? "connecting" : "disconnected";
       currentQr = null;
@@ -75,7 +81,14 @@ async function initWhatsAppEngine() {
       console.log(`[WhatsApp Engine] Connection closed. Code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
 
       if (isLoggedOut) {
-        console.log("[WhatsApp Engine] WhatsApp unlinked from phone. Clearing authentication session and resetting phonebook state...");
+        console.log("[WhatsApp Engine] WhatsApp unlinked/disconnected. Sending logout stanza, clearing authentication session and resetting phonebook state...");
+        if (sock) {
+          try { 
+            await sock.logout(); 
+          } catch (_) {
+            try { sock.end(new Error("Logged out")); } catch (_) {}
+          }
+        }
         try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (_) {}
         try {
           await run("INSERT INTO settings (key, value) VALUES ('phonebook_imported', '0') ON CONFLICT(key) DO UPDATE SET value = '0'");
