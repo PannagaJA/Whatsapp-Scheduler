@@ -92,10 +92,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return digits ? `+${digits}` : "";
   }
 
-  // Helper: Check Phonebook Sync State
+  // Helper: Check Phonebook Sync State STRICTLY based on user device sync
   function isPhonebookImported() {
-    return localStorage.getItem("wa_phonebook_synced") === "true" || 
-           (allContacts.length > 0 && allContacts.some(c => c.name && !c.is_group));
+    return localStorage.getItem("wa_phonebook_synced") === "true";
   }
 
   // 1. Toast Notification
@@ -494,14 +493,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (recipientInput) {
     recipientInput.addEventListener("click", () => {
-      if (headerStatus?.classList.contains("connected") && !isPhonebookImported()) {
+      if (!isPhonebookImported()) {
         showToast("🔒 Action Required: Tap \x27📇 Phonebook\x27 above to sync contacts first!");
+        const gateCard = document.getElementById("phonebookGateCard");
+        if (gateCard) {
+          gateCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
       }
     });
 
-    recipientInput.addEventListener("focus", () => {
+    recipientInput.addEventListener("focus", (e) => {
       if (!isPhonebookImported()) {
         if (contactsDropdown) contactsDropdown.style.display = "none";
+        recipientInput.blur();
+        showToast("🔒 Action Required: Tap \x27📇 Phonebook\x27 above to sync contacts first!");
         return;
       }
       renderContactSuggestions(recipientInput.value);
@@ -741,7 +746,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 11. Real-Time Status & Diagnostics Engine
   function updateInputAvailability(status, isSyncing, count) {
     const isConn = status === "connected";
-    const phonebookDone = isPhonebookImported() || count > 0;
+    const phonebookDone = isPhonebookImported();
     const enableInputs = isConn && phonebookDone;
 
     if (pickNativeContactBtn) {
