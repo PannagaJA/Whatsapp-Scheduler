@@ -10,7 +10,7 @@ const pino = require('pino');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
-const { run, all, DB_DIR } = require('./db');
+const { run, get, all, batchUpsertContacts, DB_DIR } = require('./db');
 
 const AUTH_DIR = path.join(DB_DIR, 'auth_info_baileys');
 if (!fs.existsSync(AUTH_DIR)) {
@@ -29,12 +29,17 @@ function markSyncing() {
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     isSyncing = false;
-  }, 12000);
+  }, 8000);
 }
 
 async function initWhatsAppEngine() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version, isLatest } = await fetchLatestBaileysVersion();
+  const { version } = await fetchLatestBaileysVersion();
+
+  // If already registered from previous session, initialize as connecting
+  if (state.creds?.registered) {
+    connectionStatus = 'connecting';
+  }
 
   sock = makeWASocket({
     version,
@@ -62,7 +67,7 @@ async function initWhatsAppEngine() {
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      connectionStatus = 'disconnected';
+      connectionStatus = shouldReconnect ? 'connecting' : 'disconnected';
       currentQr = null;
       userProfile = null;
       isSyncing = false;
@@ -82,122 +87,145 @@ async function initWhatsAppEngine() {
       markSyncing();
       console.log(`[WhatsApp Engine] Connected successfully as: ${userProfile?.name || userProfile?.id}`);
       
-      // Auto-fetch all groups and sync them into contacts table
+      // Auto-fetch participating groups and sync in background
       try {
         const groups = await sock.groupFetchAllParticipating();
-        for (const [gid, groupData] of Object.entries(groups)) {
-          await upsertContactRecord(gid, groupData.subject || '', null, 1);
+        const groupRecords = [];
+        for (const [gid, gData] of Object.entries(groups)) {
+          groupRecords.push({
+            jid: gid,
+            name: gData.subject || 'WhatsApp Group',
+            phone: '',
+            is_group: 1
+          });
+        }
+        if (groupRecords.length > 0) {
+          await batchUpsertContacts(groupRecords);
         }
       } catch (_) {}
     }
   });
 
-  // Helper to persist contacts into SQLite
-  async function upsertContactRecord(jid, rawName, rawPhone, isGroup = 0) {
-    if (!jid || jid === 'status@broadcast' || jid.endsWith('@lid') || jid.includes('broadcast')) return;
-    if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us')) return;
-
-    const isGrp = isGroup || (jid.endsWith('@g.us') ? 1 : 0);
-    const phone = rawPhone || (isGrp ? '' : jid.split('@')[0].replace(/\D/g, ''));
-    let name = (rawName || '').trim();
-    if (name.includes('@') || name === phone) name = '';
-
-    try {
-      await run(`
-        INSERT INTO contacts (jid, name, phone, is_group, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(jid) DO UPDATE SET
-          name = CASE
-            WHEN nullif(excluded.name, '') IS NOT NULL THEN excluded.name
-            WHEN contacts.name LIKE '%@%' OR contacts.name = contacts.phone THEN ''
-            ELSE contacts.name
-          END,
-          phone = coalesce(nullif(excluded.phone, ''), contacts.phone),
-          updated_at = excluded.updated_at
-      `, [jid, name, phone, isGrp, Date.now()]);
-    } catch (_) {}
-  }
-
-  // 1. Initial Multi-Device History Sync (contains all contacts, chats & messages)
+  // 1. Initial Multi-Device History Sync (contacts, chats & message pushNames)
   sock.ev.on('messaging-history.set', async ({ contacts, chats, messages }) => {
+    markSyncing();
+    const batch = [];
+
     if (contacts && contacts.length) {
       for (const c of contacts) {
-        await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
+        if (!c.id || c.id.endsWith('@lid')) continue;
+        batch.push({
+          jid: c.id,
+          name: c.name || c.notify || c.verifiedName || '',
+          phone: c.id.split('@')[0].replace(/\D/g, ''),
+          is_group: c.id.endsWith('@g.us') ? 1 : 0
+        });
       }
     }
+
     if (chats && chats.length) {
       for (const ch of chats) {
-        await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
+        if (!ch.id || ch.id.endsWith('@lid')) continue;
+        batch.push({
+          jid: ch.id,
+          name: ch.name || '',
+          phone: ch.id.endsWith('@g.us') ? '' : ch.id.split('@')[0].replace(/\D/g, ''),
+          is_group: ch.id.endsWith('@g.us') ? 1 : 0
+        });
       }
     }
+
     if (messages && messages.length) {
       for (const m of messages) {
         if (!m.key) continue;
         const jid = m.key.remoteJid;
         const sender = m.key.participant || jid;
         const pushName = m.pushName || '';
-        if (jid && !jid.endsWith('@g.us')) {
-          await upsertContactRecord(jid, pushName, null, 0);
-        } else if (sender && !sender.endsWith('@g.us')) {
-          await upsertContactRecord(sender, pushName, null, 0);
+        if (jid && !jid.endsWith('@g.us') && !jid.endsWith('@lid')) {
+          batch.push({ jid, name: pushName, phone: jid.split('@')[0].replace(/\D/g, ''), is_group: 0 });
+        } else if (sender && !sender.endsWith('@g.us') && !sender.endsWith('@lid')) {
+          batch.push({ jid: sender, name: pushName, phone: sender.split('@')[0].replace(/\D/g, ''), is_group: 0 });
         }
       }
     }
+
+    if (batch.length > 0) {
+      await batchUpsertContacts(batch);
+    }
   });
 
-  // 2. Contacts events
+  // 2. Real-Time Contacts Updates
   sock.ev.on('contacts.set', async ({ contacts }) => {
-    for (const c of contacts || []) {
-      await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
-    }
+    if (!contacts || !contacts.length) return;
+    const batch = contacts.map(c => ({
+      jid: c.id,
+      name: c.name || c.notify || c.verifiedName || '',
+      phone: (c.id || '').split('@')[0].replace(/\D/g, ''),
+      is_group: (c.id || '').endsWith('@g.us') ? 1 : 0
+    }));
+    await batchUpsertContacts(batch);
   });
 
   sock.ev.on('contacts.upsert', async (contacts) => {
-    for (const c of contacts || []) {
-      await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
-    }
+    if (!contacts || !contacts.length) return;
+    const batch = contacts.map(c => ({
+      jid: c.id,
+      name: c.name || c.notify || c.verifiedName || '',
+      phone: (c.id || '').split('@')[0].replace(/\D/g, ''),
+      is_group: (c.id || '').endsWith('@g.us') ? 1 : 0
+    }));
+    await batchUpsertContacts(batch);
   });
 
   sock.ev.on('contacts.update', async (updates) => {
-    for (const u of updates || []) {
-      if (u.id && (u.name || u.notify)) {
-        await upsertContactRecord(u.id, u.name || u.notify || '', null);
-      }
-    }
+    if (!updates || !updates.length) return;
+    const batch = updates.map(u => ({
+      jid: u.id,
+      name: u.name || u.notify || '',
+      phone: (u.id || '').split('@')[0].replace(/\D/g, ''),
+      is_group: (u.id || '').endsWith('@g.us') ? 1 : 0
+    }));
+    await batchUpsertContacts(batch);
   });
 
-  // 3. Chats & Groups events
+  // 3. Real-Time Chats & Messages
   sock.ev.on('chats.set', async ({ chats }) => {
-    for (const ch of chats || []) {
-      await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
-    }
+    if (!chats || !chats.length) return;
+    const batch = chats.map(ch => ({
+      jid: ch.id,
+      name: ch.name || '',
+      phone: (ch.id || '').endsWith('@g.us') ? '' : (ch.id || '').split('@')[0].replace(/\D/g, ''),
+      is_group: (ch.id || '').endsWith('@g.us') ? 1 : 0
+    }));
+    await batchUpsertContacts(batch);
   });
 
   sock.ev.on('chats.upsert', async (chats) => {
-    for (const ch of chats || []) {
-      await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
-    }
-  });
-
-  sock.ev.on('groups.update', async (updates) => {
-    for (const g of updates || []) {
-      if (g.id && g.subject) {
-        await upsertContactRecord(g.id, g.subject, null, 1);
-      }
-    }
+    if (!chats || !chats.length) return;
+    const batch = chats.map(ch => ({
+      jid: ch.id,
+      name: ch.name || '',
+      phone: (ch.id || '').endsWith('@g.us') ? '' : (ch.id || '').split('@')[0].replace(/\D/g, ''),
+      is_group: (ch.id || '').endsWith('@g.us') ? 1 : 0
+    }));
+    await batchUpsertContacts(batch);
   });
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
+    const batch = [];
     for (const m of messages || []) {
       if (!m.key) continue;
       const jid = m.key.remoteJid;
       const sender = m.key.participant || jid;
-      const pushName = m.pushName || '';
-      if (jid && !jid.endsWith('@g.us')) {
-        await upsertContactRecord(jid, pushName, null, 0);
-      } else if (sender && !sender.endsWith('@g.us')) {
-        await upsertContactRecord(sender, pushName, null, 0);
+      const pushName = (m.pushName || '').trim();
+      if (pushName && jid && !jid.endsWith('@g.us') && !jid.endsWith('@lid')) {
+        batch.push({ jid, name: pushName, phone: jid.split('@')[0].replace(/\D/g, ''), is_group: 0 });
+      } else if (pushName && sender && !sender.endsWith('@g.us') && !sender.endsWith('@lid')) {
+        batch.push({ jid: sender, name: pushName, phone: sender.split('@')[0].replace(/\D/g, ''), is_group: 0 });
       }
+    }
+    if (batch.length > 0) {
+      await batchUpsertContacts(batch);
     }
   });
 
@@ -207,7 +235,7 @@ async function initWhatsAppEngine() {
 async function getStatus() {
   let count = 0;
   try {
-    const row = await get('SELECT COUNT(*) as count FROM contacts');
+    const row = await get(`SELECT COUNT(*) as count FROM contacts WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')`);
     count = row ? row.count : 0;
   } catch (_) {}
 
@@ -228,7 +256,6 @@ async function requestPairingCode(phoneNumber) {
   let cleaned = String(phoneNumber || '').replace(/\D/g, '');
   if (cleaned.startsWith('0')) cleaned = cleaned.replace(/^0+/, '');
   
-  // Auto-prepend 91 if user entered standard 10-digit mobile number without country code
   if (cleaned.length === 10) {
     cleaned = '91' + cleaned;
   }
@@ -259,8 +286,8 @@ async function formatRecipientJid(recipient) {
     return target;
   }
 
-  // 1. Check if it matches a contact name in the SQLite database
-  let contact = await require('./db').get(
+  // 1. Check if it matches a contact name in SQLite
+  let contact = await get(
     `SELECT jid FROM contacts WHERE lower(name) = lower(?) LIMIT 1`,
     [target]
   );
@@ -274,9 +301,9 @@ async function formatRecipientJid(recipient) {
     normalizedDigits = '91' + rawDigits.slice(1);
   }
 
-  // 2. Check by phone number only if digits are present
+  // 2. Check by phone number in SQLite
   if (rawDigits.length > 0) {
-    contact = await require('./db').get(
+    contact = await get(
       `SELECT jid FROM contacts 
        WHERE phone = ? 
           OR phone = ? 
@@ -287,7 +314,7 @@ async function formatRecipientJid(recipient) {
     if (contact?.jid) return contact.jid;
   }
 
-  // 3. Format as direct phone number (auto-defaults 10-digits to India +91)
+  // 3. Format direct JID (defaults 10-digit Indian numbers to +91)
   if (normalizedDigits.length >= 7) {
     return `${normalizedDigits}@s.whatsapp.net`;
   }
@@ -302,7 +329,6 @@ async function sendWhatsAppMessage(recipient, text, attachments = []) {
 
   const jid = await formatRecipientJid(recipient);
 
-  // Send attachments first if present
   if (attachments && attachments.length > 0) {
     for (let i = 0; i < attachments.length; i++) {
       const file = attachments[i];
@@ -317,38 +343,17 @@ async function sendWhatsAppMessage(recipient, text, attachments = []) {
       const caption = (i === attachments.length - 1 && text) ? text : '';
 
       if (mimeType.startsWith('image/')) {
-        await sock.sendMessage(jid, {
-          image: fileBuffer,
-          caption,
-          mimetype: mimeType,
-          fileName
-        });
+        await sock.sendMessage(jid, { image: fileBuffer, caption, mimetype: mimeType, fileName });
       } else if (mimeType.startsWith('video/')) {
-        await sock.sendMessage(jid, {
-          video: fileBuffer,
-          caption,
-          mimetype: mimeType,
-          fileName
-        });
+        await sock.sendMessage(jid, { video: fileBuffer, caption, mimetype: mimeType, fileName });
       } else if (mimeType.startsWith('audio/')) {
-        await sock.sendMessage(jid, {
-          audio: fileBuffer,
-          mimetype: mimeType,
-          fileName
-        });
+        await sock.sendMessage(jid, { audio: fileBuffer, mimetype: mimeType, fileName });
       } else {
-        // Send as Document (CSVs, PDFs, DOCX, ZIP, etc.)
-        await sock.sendMessage(jid, {
-          document: fileBuffer,
-          mimetype: mimeType,
-          fileName,
-          caption
-        });
+        await sock.sendMessage(jid, { document: fileBuffer, mimetype: mimeType, fileName, caption });
       }
       await delay(1000);
     }
   } else if (text) {
-    // Plain text message
     await sock.sendMessage(jid, { text });
   }
 

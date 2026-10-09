@@ -640,18 +640,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (refreshQueueBtn) refreshQueueBtn.onclick = loadSchedules;
 
-  // 11. Live Connection Status, Input Locking & QR Code Polling
+  // 11. Live Connection Status & Non-Blocking Contact Sync
   let syncAnimationPercent = 0;
   let syncAnimTimer = null;
 
-  function setScheduleInputsLock(isLocked, mode = 'disconnected', count = 0) {
+  function updateInputAvailability(status, isSyncing, count) {
+    const isConn = status === 'connected';
+    const isConnecting = status === 'connecting';
+    const hasContacts = allContacts.length > 0 || count > 0;
+
+    // Recipient & Message inputs stay active if connected, connecting, or contacts exist
+    const enableInputs = isConn || isConnecting || hasContacts;
+
     if (recipientInput) {
-      recipientInput.disabled = isLocked;
-      if (isLocked) {
+      recipientInput.disabled = !enableInputs;
+      if (!enableInputs) {
         recipientInput.classList.add('input-disabled');
-        recipientInput.placeholder = mode === 'syncing' 
-          ? '⏳ Syncing WhatsApp contacts… Please wait' 
-          : '⚠️ Connect WhatsApp first to schedule messages';
+        recipientInput.placeholder = '⚠️ Link WhatsApp in Device Link to schedule messages';
       } else {
         recipientInput.classList.remove('input-disabled');
         recipientInput.placeholder = 'Name or +919876543210…';
@@ -659,10 +664,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (pickNativeContactBtn) {
-      pickNativeContactBtn.disabled = isLocked;
-      if (isLocked) {
+      pickNativeContactBtn.disabled = !isConn;
+      if (!isConn) {
         pickNativeContactBtn.classList.add('btn-disabled');
-        pickNativeContactBtn.title = mode === 'syncing' ? 'Sync in progress…' : 'Connect WhatsApp first to sync phonebook';
+        pickNativeContactBtn.title = 'Connect WhatsApp first to sync phonebook';
       } else {
         pickNativeContactBtn.classList.remove('btn-disabled');
         pickNativeContactBtn.title = 'Sync contacts from phonebook';
@@ -670,12 +675,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (messageInput) {
-      messageInput.disabled = isLocked;
-      if (isLocked) {
+      messageInput.disabled = !enableInputs;
+      if (!enableInputs) {
         messageInput.classList.add('input-disabled');
-        messageInput.placeholder = mode === 'syncing' 
-          ? 'Message input will unlock once 100% sync completes…' 
-          : 'Connect WhatsApp to enable message composition';
+        messageInput.placeholder = 'Connect WhatsApp to compose messages…';
       } else {
         messageInput.classList.remove('input-disabled');
         messageInput.placeholder = 'Type your scheduled message…';
@@ -683,8 +686,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (submitScheduleBtn) {
-      submitScheduleBtn.disabled = isLocked;
-      if (isLocked) {
+      submitScheduleBtn.disabled = !enableInputs;
+      if (!enableInputs) {
         submitScheduleBtn.classList.add('btn-disabled');
       } else {
         submitScheduleBtn.classList.remove('btn-disabled');
@@ -698,6 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       
       const isConn = data.status === 'connected';
+      const isConnecting = data.status === 'connecting';
       const isSyncing = Boolean(data.syncing);
       const contactCount = data.contactCount || 0;
 
@@ -705,21 +709,28 @@ document.addEventListener('DOMContentLoaded', () => {
         headerStatus.className = `status-indicator ${data.status}`;
       }
 
+      updateInputAvailability(data.status, isSyncing, contactCount);
+
       if (devicePill) {
         if (isConn) {
           devicePill.textContent = 'Status: Connected ✓';
           devicePill.style.background = 'rgba(37, 211, 102, 0.15)';
           devicePill.style.color = '#25D366';
+        } else if (isConnecting) {
+          devicePill.textContent = 'Status: Connecting…';
+          devicePill.style.background = 'rgba(255, 193, 7, 0.15)';
+          devicePill.style.color = '#ffc107';
         } else {
-          devicePill.textContent = data.status === 'connecting' ? 'Status: Connecting…' : 'Status: Disconnected';
+          devicePill.textContent = 'Status: Disconnected';
           devicePill.style.background = 'rgba(234, 67, 53, 0.15)';
           devicePill.style.color = '#ff6b6b';
         }
       }
 
+      const effectiveCount = Math.max(contactCount, allContacts.length);
       if (deviceUserInfo) {
-        if (isConn && data.user) {
-          deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || '')} (${data.user.id ? data.user.id.split(':')[0] : ''})<br><small style="color: var(--text-muted);">${contactCount} Contacts Synced</small>`;
+        if ((isConn || isConnecting) && data.user) {
+          deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || '')} (${data.user.id ? data.user.id.split(':')[0] : ''})<br><small style="color: #25D366; font-weight: 600;">✓ ${effectiveCount} Contacts Synced & Available</small>`;
           deviceUserInfo.style.display = 'block';
         } else {
           deviceUserInfo.style.display = 'none';
@@ -727,39 +738,33 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (logoutBox) {
-        logoutBox.style.display = isConn ? 'block' : 'none';
+        logoutBox.style.display = (isConn || isConnecting) ? 'block' : 'none';
       }
 
       if (isConn) {
         if (isSyncing) {
-          // Locked during sync until 100%
-          setScheduleInputsLock(true, 'syncing', contactCount);
-
           if (headerStatus) headerStatus.querySelector('.status-text').innerHTML = `Syncing ${contactCount > 0 ? '(' + contactCount + ')' : ''} <span class="sync-spinner-inline"></span>`;
           
           if (!syncAnimTimer) {
-            syncAnimationPercent = 15;
+            syncAnimationPercent = 20;
             syncAnimTimer = setInterval(() => {
               if (syncAnimationPercent < 90) {
-                syncAnimationPercent += Math.floor(Math.random() * 8) + 4;
+                syncAnimationPercent += Math.floor(Math.random() * 6) + 3;
                 if (syncAnimationPercent > 90) syncAnimationPercent = 90;
-                updateSyncProgress(syncAnimationPercent, `Syncing contacts from WhatsApp… ${contactCount > 0 ? contactCount + ' synced' : ''}`);
+                updateSyncProgress(syncAnimationPercent, `Syncing WhatsApp contacts & chats… ${contactCount > 0 ? contactCount + ' synced' : ''}`);
               }
-            }, 600);
+            }, 500);
           } else {
-            updateSyncProgress(syncAnimationPercent, `Syncing contacts from WhatsApp… ${contactCount > 0 ? contactCount + ' synced' : ''}`);
+            updateSyncProgress(syncAnimationPercent, `Syncing WhatsApp contacts & chats… ${contactCount > 0 ? contactCount + ' synced' : ''}`);
           }
         } else {
-          // 100% Sync Complete & Connected -> UNLOCK ALL INPUTS!
           if (syncAnimTimer) {
             clearInterval(syncAnimTimer);
             syncAnimTimer = null;
             syncAnimationPercent = 100;
-            updateSyncProgress(100, `✓ 100% Synced (${contactCount} contacts from WhatsApp)`, true);
+            updateSyncProgress(100, `✓ Synced ${contactCount} contacts from WhatsApp`, true);
             loadContacts();
           }
-
-          setScheduleInputsLock(false, 'ready', contactCount);
           if (headerStatus) headerStatus.querySelector('.status-text').textContent = 'Connected';
         }
 
@@ -774,11 +779,13 @@ document.addEventListener('DOMContentLoaded', () => {
           showToast('✓ WhatsApp Connected Successfully!');
           switchTab('paneSchedule');
         }
-      } else {
-        // Disconnected -> Lock inputs with prompt to connect
-        setScheduleInputsLock(true, 'disconnected');
+      } else if (isConnecting) {
         if (headerStatus) {
-          headerStatus.querySelector('.status-text').textContent = data.status === 'connecting' ? 'Connecting…' : 'Disconnected';
+          headerStatus.querySelector('.status-text').textContent = 'Connecting…';
+        }
+      } else {
+        if (headerStatus) {
+          headerStatus.querySelector('.status-text').textContent = data.status === 'qr' ? 'Scan QR Code' : 'Disconnected';
         }
 
         if (qrModal && qrModal.classList.contains('active')) {
@@ -792,13 +799,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     } catch (_) {
-      setScheduleInputsLock(true, 'disconnected');
       if (headerStatus) {
         headerStatus.className = 'status-indicator disconnected';
         headerStatus.querySelector('.status-text').textContent = 'Offline';
       }
     }
   }
+
 
   // 12. Show QR Code Modal Handler
   async function fetchQrNow() {
