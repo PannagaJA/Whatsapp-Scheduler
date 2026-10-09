@@ -37,6 +37,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const showPairCodeBtn = document.getElementById("showPairCodeBtn");
   const logoutBox = document.getElementById("logoutBox");
   const logoutBtn = document.getElementById("logoutBtn");
+  const deviceAppVersion = document.getElementById("deviceAppVersion");
+  const btnDownloadApkDirect = document.getElementById("btnDownloadApkDirect");
 
   // DOM Elements - QR Modal
   const qrModal = document.getElementById("qrModal");
@@ -84,6 +86,12 @@ document.addEventListener("DOMContentLoaded", () => {
     return digits ? `+${digits}` : "";
   }
 
+  // Helper: Check Phonebook Sync State
+  function isPhonebookImported() {
+    return localStorage.getItem("wa_phonebook_synced") === "true" || 
+           (allContacts.length > 0 && allContacts.some(c => c.name && !c.is_group));
+  }
+
   // 1. Toast Notification
   function showToast(msg, duration = 3000) {
     const toast = document.getElementById("toast");
@@ -98,8 +106,11 @@ document.addEventListener("DOMContentLoaded", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }
 
-  // 3. Tab Switching
+  // 3. Tab Switching with Persistent State across Refreshes
   function switchTab(targetId) {
+    if (!targetId) targetId = "paneSchedule";
+    try { localStorage.setItem("wa_active_tab", targetId); } catch (_) {}
+
     navItems.forEach(n => {
       if (n.getAttribute("data-tab") === targetId) {
         n.classList.add("active");
@@ -142,6 +153,10 @@ document.addEventListener("DOMContentLoaded", () => {
     headerStatus.style.cursor = "pointer";
     headerStatus.addEventListener("click", () => switchTab("paneDevice"));
   }
+
+  // Restore active tab immediately on load/refresh
+  const savedTab = localStorage.getItem("wa_active_tab") || "paneSchedule";
+  switchTab(savedTab);
 
   // 4. Default Date & Time
   function initDateTime() {
@@ -264,10 +279,12 @@ document.addEventListener("DOMContentLoaded", () => {
           body: JSON.stringify({ contacts: list })
         });
         const data = await res.json();
+        localStorage.setItem("wa_phonebook_synced", "true");
         await loadContacts();
         const count = data.count || list.length;
         updateSyncProgress(100, `✓ Synced all ${count} contacts!`, true);
         showToast(`✓ Imported ${count} contacts with exact phonebook names!`, 4000);
+        checkStatus();
         if (recipientInput) renderContactSuggestions(recipientInput.value);
       } else {
         showToast("No phonebook contacts found on device.");
@@ -314,9 +331,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ contacts: formatted })
               });
               const data = await res.json();
+              localStorage.setItem("wa_phonebook_synced", "true");
               await loadContacts();
               updateSyncProgress(100, `✓ Synced ${data.count || formatted.length} contacts!`, true);
               showToast(`✓ Imported ${data.count || formatted.length} contacts with names!`);
+              checkStatus();
               if (recipientInput) renderContactSuggestions(recipientInput.value);
             }
           }
@@ -370,6 +389,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderContactSuggestions(filter = "") {
     if (!contactsDropdown) return;
+
+    if (!isPhonebookImported()) {
+      contactsDropdown.style.display = "none";
+      return;
+    }
+
     const q = filter.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, "");
     let matches = [];
@@ -401,7 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (allContacts.length === 0) {
         const tipBox = document.createElement("div");
         tipBox.style.cssText = "padding: 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5;";
-        tipBox.innerHTML = `⏳ WhatsApp contacts are syncing in background.<br><strong>Tip:</strong> You can type any 10-digit number directly (e.g. <code>9876543210</code>).`;
+        tipBox.innerHTML = `🔒 Tap <strong>📇 Phonebook</strong> above to sync contacts from your device.`;
         contactsDropdown.appendChild(tipBox);
         contactsDropdown.style.display = "block";
         return;
@@ -413,7 +438,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const headEl = document.createElement("div");
     headEl.style.cssText = "padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;";
     const headTitle = document.createElement("span");
-    headTitle.textContent = q ? "MATCHING CONTACTS" : "RECENT CHATS & CONTACTS";
+    headTitle.textContent = q ? "MATCHING CONTACTS" : "PHONEBOOK CONTACTS";
     const headCount = document.createElement("span");
     headCount.textContent = `${allContacts.length} Synced`;
     headEl.appendChild(headTitle);
@@ -445,8 +470,10 @@ document.addEventListener("DOMContentLoaded", () => {
       item.appendChild(avatar);
       item.appendChild(info);
 
+      // SHOW ONLY CONTACT NAME IN INPUT FIELD (e.g. "Raghu Amc")
       item.onclick = () => {
-        recipientInput.value = c.is_group ? c.name : (c.name ? `${c.name} (${formatPhone(c.phone)})` : formatPhone(c.phone));
+        const cleanName = c.name ? c.name.trim() : (c.is_group ? "WhatsApp Group" : formatPhone(c.phone));
+        recipientInput.value = cleanName;
         recipientInput.dataset.jid = c.jid || "";
         recipientInput.dataset.phone = c.phone || "";
         recipientInput.dataset.name = c.name || "";
@@ -460,10 +487,28 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (recipientInput) {
-    recipientInput.addEventListener("focus", () => renderContactSuggestions(recipientInput.value));
+    recipientInput.addEventListener("click", () => {
+      if (headerStatus?.classList.contains("connected") && !isPhonebookImported()) {
+        showToast("🔒 Action Required: Tap \x27📇 Phonebook\x27 above to sync contacts first!");
+      }
+    });
+
+    recipientInput.addEventListener("focus", () => {
+      if (!isPhonebookImported()) {
+        if (contactsDropdown) contactsDropdown.style.display = "none";
+        return;
+      }
+      renderContactSuggestions(recipientInput.value);
+    });
+
     recipientInput.addEventListener("input", () => {
-      // Clear data attributes only if user drastically changes text
-      if (!recipientInput.value.includes("(")) {
+      const val = recipientInput.value.trim().toLowerCase();
+      const match = allContacts.find(c => (c.name && c.name.toLowerCase() === val));
+      if (match) {
+        recipientInput.dataset.jid = match.jid || "";
+        recipientInput.dataset.phone = match.phone || "";
+        recipientInput.dataset.name = match.name || "";
+      } else {
         delete recipientInput.dataset.jid;
         delete recipientInput.dataset.phone;
         delete recipientInput.dataset.name;
@@ -492,23 +537,12 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (boundPhone && boundPhone.length > 0) {
         recipient = boundPhone;
       } else {
-        // Parse formatted string "Name (+91 98765 43210)"
-        const formattedMatch = rawRecipient.match(/^(.*?)\s*[\(\[]([+0-9\s-]+)[\)\]]$/);
-        if (formattedMatch) {
-          const phoneDigits = formattedMatch[2].replace(/\D/g, "");
-          if (phoneDigits.length >= 7) {
-            recipient = phoneDigits;
-          } else if (formattedMatch[1].trim()) {
-            recipient = formattedMatch[1].trim();
-          }
-        } else {
-          const match = allContacts.find(c => 
-            (c.name && c.name.toLowerCase() === rawRecipient.toLowerCase()) || 
-            (c.phone && c.phone === rawRecipient.replace(/\D/g, ""))
-          );
-          if (match) {
-            recipient = match.jid || match.phone || match.name;
-          }
+        const match = allContacts.find(c => 
+          (c.name && c.name.toLowerCase() === rawRecipient.toLowerCase()) || 
+          (c.phone && c.phone === rawRecipient.replace(/\D/g, ""))
+        );
+        if (match) {
+          recipient = match.jid || match.phone || match.name;
         }
       }
 
@@ -637,26 +671,35 @@ document.addEventListener("DOMContentLoaded", () => {
         statusLabel = "Sending…";
       }
 
-      let recipientDisplay = s.contact_name || s.recipient;
+      let displayName = s.contact_name || "";
+      let phoneStr = "";
       if (s.recipient && s.recipient.endsWith("@s.whatsapp.net")) {
-        const phone = s.recipient.split("@")[0];
-        recipientDisplay = s.contact_name ? `${s.contact_name} (${formatPhone(phone)})` : formatPhone(phone);
+        phoneStr = s.recipient.split("@")[0];
       } else if (s.recipient && /^[0-9+]+$/.test(s.recipient)) {
-        recipientDisplay = s.contact_name ? `${s.contact_name} (${formatPhone(s.recipient)})` : formatPhone(s.recipient);
+        phoneStr = s.recipient;
+      }
+
+      if (!displayName && phoneStr) {
+        displayName = formatPhone(phoneStr);
+      } else if (!displayName) {
+        displayName = s.recipient || "WhatsApp Recipient";
       }
 
       const attachmentsCount = (s.attachments && s.attachments.length) ? s.attachments.length : 0;
 
       card.innerHTML = `
         <div class="queue-card-header">
-          <div class="queue-recipient">👤 ${escapeHtml(recipientDisplay)}</div>
+          <div class="queue-recipient-box">
+            <div class="queue-recipient">👤 ${escapeHtml(displayName)}</div>
+            ${phoneStr && s.contact_name ? `<div class="queue-phone-sub">📞 ${formatPhone(phoneStr)}</div>` : ""}
+          </div>
           <div class="queue-status-badge ${badgeClass}">${statusLabel}</div>
         </div>
         <div class="queue-message-preview">${escapeHtml(s.text || (attachmentsCount > 0 ? "📎 " + attachmentsCount + " Attachment(s)" : "No Text"))}</div>
         ${attachmentsCount > 0 && s.text ? `<div style="font-size: 11px; color: var(--accent); margin-top: 4px;">📎 ${attachmentsCount} file(s) attached</div>` : ""}
         <div class="queue-footer">
           <div class="queue-time">🕒 ${dateStr}, ${timeStr}</div>
-          ${s.status === "scheduled" || s.status === "retrying" || s.status === "failed" ? `<button class="btn-cancel-schedule" data-id="${s.id}">Delete</button>` : ""}
+          ${s.status === "scheduled" || s.status === "retrying" || s.status === "failed" ? `<button class="btn-cancel-schedule" data-id="${s.id}">Cancel</button>` : ""}
         </div>
       `;
 
@@ -692,12 +735,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // 11. Real-Time Status & Diagnostics Engine
   function updateInputAvailability(status, isSyncing, count) {
     const isConn = status === "connected";
-    const isConnecting = status === "connecting";
-    const hasContacts = allContacts.length > 0 || count > 0;
-
-    // Phonebook import is mandatory after WhatsApp connects
-    const isContactsImported = hasContacts;
-    const enableInputs = isConn && isContactsImported;
+    const phonebookDone = isPhonebookImported() || count > 0;
+    const enableInputs = isConn && phonebookDone;
 
     if (pickNativeContactBtn) {
       pickNativeContactBtn.disabled = !isConn;
@@ -705,14 +744,14 @@ document.addEventListener("DOMContentLoaded", () => {
         pickNativeContactBtn.classList.add("btn-disabled");
         pickNativeContactBtn.classList.remove("btn-phonebook-mandatory");
         pickNativeContactBtn.title = "Connect WhatsApp first to sync phonebook";
-      } else if (!isContactsImported) {
+      } else if (!phonebookDone) {
         pickNativeContactBtn.classList.remove("btn-disabled");
         pickNativeContactBtn.classList.add("btn-phonebook-mandatory");
         pickNativeContactBtn.title = "Action Required: Tap to import phonebook contacts";
       } else {
         pickNativeContactBtn.classList.remove("btn-disabled");
         pickNativeContactBtn.classList.remove("btn-phonebook-mandatory");
-        pickNativeContactBtn.title = "Phonebook contacts synced";
+        pickNativeContactBtn.title = "Phonebook contacts synced ✓";
       }
     }
 
@@ -721,9 +760,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!isConn) {
         recipientInput.classList.add("input-disabled");
         recipientInput.placeholder = "⚠️ Link WhatsApp in Device Link to schedule messages";
-      } else if (!isContactsImported) {
+      } else if (!phonebookDone) {
         recipientInput.classList.add("input-disabled");
-        recipientInput.placeholder = "👉 Tap \x27📇 Phonebook\x27 button above to sync contacts first";
+        recipientInput.placeholder = "🔒 Tap \x27📇 Phonebook\x27 button above to sync contacts first";
       } else {
         recipientInput.classList.remove("input-disabled");
         recipientInput.placeholder = "Type contact name or +919876543210…";
@@ -734,7 +773,7 @@ document.addEventListener("DOMContentLoaded", () => {
       messageInput.disabled = !enableInputs;
       if (!enableInputs) {
         messageInput.classList.add("input-disabled");
-        messageInput.placeholder = "Connect WhatsApp to compose messages…";
+        messageInput.placeholder = !isConn ? "Connect WhatsApp to compose messages…" : "Sync phonebook contacts first…";
       } else {
         messageInput.classList.remove("input-disabled");
         messageInput.placeholder = "Type your scheduled message…";
@@ -803,7 +842,6 @@ document.addEventListener("DOMContentLoaded", () => {
           headerStatus.querySelector(".status-text").textContent = "Connected";
         }
 
-        // Only show full-screen sync banner if user has 0 contacts loaded and sync is active
         if (isSyncing && contactCount === 0) {
           updateSyncProgress(50, "Syncing WhatsApp contacts & chats in background…");
         }
@@ -981,6 +1019,7 @@ document.addEventListener("DOMContentLoaded", () => {
         logoutBtn.disabled = true;
         logoutBtn.textContent = "Unlinking…";
         await fetch("/api/logout", { method: "POST" });
+        localStorage.removeItem("wa_phonebook_synced");
         showToast("✓ WhatsApp Unlinked");
         checkStatus();
       } catch (err) {
@@ -992,7 +1031,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // 15. In-App Auto-Update Checker
+  // 15. In-App Auto-Update Checker & Dynamic APK Download Card
   const updateBanner = document.getElementById("updateBanner");
   const updateVersionTag = document.getElementById("updateVersionTag");
   const updateNotes = document.getElementById("updateNotes");
@@ -1013,17 +1052,10 @@ document.addEventListener("DOMContentLoaded", () => {
     return false;
   }
 
-    const deviceAppVersion = document.getElementById("deviceAppVersion");
-  const btnDownloadApkDirect = document.getElementById("btnDownloadApkDirect");
-
   async function checkForUpdates() {
     const currentVersion = (window.AndroidNative && typeof window.AndroidNative.getAppVersionName === "function")
       ? window.AndroidNative.getAppVersionName()
       : "1.0.0";
-
-    if (deviceAppVersion) {
-      deviceAppVersion.textContent = "Current App Version: v" + currentVersion;
-    }
 
     let latestTag = null;
     let apkUrl = "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk";
@@ -1059,18 +1091,40 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (_) {}
 
-    if (btnDownloadApkDirect) {
-      btnDownloadApkDirect.onclick = () => {
-        if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
-          showToast("Starting APK download…", 3000);
-          window.AndroidNative.downloadAndInstallUpdate(apkUrl);
-        } else {
-          window.open(apkUrl, "_blank");
-        }
-      };
+    const hasNewRelease = latestTag && isNewerVersion(latestTag, currentVersion);
+
+    // Update Device Link "App Updates & APK" Card
+    if (deviceAppVersion) {
+      if (hasNewRelease) {
+        deviceAppVersion.innerHTML = "Current: <strong>v" + currentVersion + "</strong> · <span style='color: #25D366; font-weight: 700;'>Update Available: v" + latestTag + "</span>";
+      } else {
+        deviceAppVersion.innerHTML = "Current: <strong>v" + currentVersion + "</strong> · <span style='color: #25D366; font-weight: 600;'>✓ Up to Date</span>";
+      }
     }
 
-    if (latestTag && isNewerVersion(latestTag, currentVersion)) {
+    if (btnDownloadApkDirect) {
+      if (hasNewRelease) {
+        btnDownloadApkDirect.disabled = false;
+        btnDownloadApkDirect.classList.remove("btn-disabled");
+        btnDownloadApkDirect.innerHTML = "<span>Download Update</span>";
+        btnDownloadApkDirect.onclick = () => {
+          if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
+            showToast("Starting APK download…", 3000);
+            window.AndroidNative.downloadAndInstallUpdate(apkUrl);
+          } else {
+            window.open(apkUrl, "_blank");
+          }
+        };
+      } else {
+        btnDownloadApkDirect.disabled = true;
+        btnDownloadApkDirect.classList.add("btn-disabled");
+        btnDownloadApkDirect.innerHTML = "<span>Latest Version ✓</span>";
+        btnDownloadApkDirect.onclick = null;
+      }
+    }
+
+    // Show Top Update Banner if newer version is found
+    if (hasNewRelease) {
       if (updateBanner && updateVersionTag) {
         updateVersionTag.textContent = latestTag.startsWith("v") ? latestTag : "v" + latestTag;
         if (updateNotes) updateNotes.textContent = releaseName;
@@ -1093,6 +1147,8 @@ document.addEventListener("DOMContentLoaded", () => {
           };
         }
       }
+    } else {
+      if (updateBanner) updateBanner.style.display = "none";
     }
   }
 
