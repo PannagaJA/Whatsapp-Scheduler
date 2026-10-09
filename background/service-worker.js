@@ -232,12 +232,67 @@ async function restoreAlarms() {
 }
 
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const autoOpenedTabIds = new Set();
+
 async function findWhatsAppTab() {
   const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
   return tabs.find(t => t.status === 'complete') || tabs[0] || null;
 }
 
-async function waitForContentScript(tabId, timeout = 12000) {
+async function getOrCreateWhatsAppTab() {
+  let tab = await findWhatsAppTab();
+  let wasAutoOpened = false;
+
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: 'https://web.whatsapp.com', active: false });
+    wasAutoOpened = true;
+    autoOpenedTabIds.add(tab.id);
+
+    // Wait for tab status to become 'complete' (up to 35s)
+    const deadline = Date.now() + 35000;
+    while (Date.now() < deadline) {
+      await sleep(1000);
+      try {
+        const updated = await chrome.tabs.get(tab.id);
+        if (updated.status === 'complete') {
+          tab = updated;
+          break;
+        }
+      } catch (_) {
+        autoOpenedTabIds.delete(tab.id);
+        throw new Error('Auto-opened WhatsApp Web tab was closed.');
+      }
+    }
+  }
+
+  // Ensure content script is ready
+  await ensureContentScript(tab.id);
+
+  // Poll for WhatsApp Web interface to load / authenticate (up to 45s)
+  const readyDeadline = Date.now() + 45000;
+  while (Date.now() < readyDeadline) {
+    try {
+      const ping = await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+      if (ping?.qrPresent) {
+        throw new Error('WhatsApp Web is not logged in. Please open WhatsApp Web and scan the QR code.');
+      }
+      if (ping?.authenticated || ping?.ready) {
+        const diag = await chrome.tabs.sendMessage(tab.id, { type: 'DIAGNOSTICS' });
+        if (diag?.sidebar || diag?.main || (diag?.searchInputs && diag.searchInputs.length > 0)) {
+          break;
+        }
+      }
+    } catch (e) {
+      if (/not logged in/i.test(e?.message || '')) throw e;
+    }
+    await sleep(1500);
+  }
+
+  return { tab, wasAutoOpened };
+}
+
+async function waitForContentScript(tabId, timeout = 15000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     try {
@@ -283,7 +338,14 @@ async function processMessage(id) {
   const initial = await getMessage(id);
   if (!initial || !['scheduled', 'retrying'].includes(initial.status)) return;
 
-  const tab = await findWhatsAppTab();
+  let tabInfo;
+  try {
+    tabInfo = await getOrCreateWhatsAppTab();
+  } catch (err) {
+    return retry(id, err?.message || 'Could not connect to WhatsApp Web.', 'whatsapp-tab');
+  }
+
+  const { tab, wasAutoOpened } = tabInfo;
   if (!tab) return retry(id, 'WhatsApp Web is not open.', 'whatsapp-tab');
 
   return enqueueTabSend(tab.id, async () => {
@@ -351,6 +413,20 @@ async function processMessage(id) {
       }
     } finally {
       processingIds.delete(id);
+
+      // If this tab was auto-opened by the extension, close it when idle
+      if (wasAutoOpened || autoOpenedTabIds.has(tab.id)) {
+        try {
+          if (processingIds.size === 0) {
+            autoOpenedTabIds.delete(tab.id);
+            const currentTab = await chrome.tabs.get(tab.id);
+            // Only remove if the user did not switch focus to it
+            if (!currentTab.active) {
+              await chrome.tabs.remove(tab.id);
+            }
+          }
+        } catch (_) {}
+      }
     }
   });
 }

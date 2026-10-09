@@ -2049,9 +2049,19 @@
     (async () => {
       try {
         switch (message.type) {
-          case 'PING':
-            sendResponse({ success: true, ready: true, version: EXTENSION_VERSION });
+          case 'PING': {
+            const hasSide = !!(document.querySelector('#side') || document.querySelector('#pane-side') || document.querySelector('[data-testid="chat-list"]'));
+            const isQr = !!(document.querySelector('canvas[aria-label*="Scan"], [data-testid="qrcode"], [data-ref]'));
+            const isLanding = !!(document.querySelector('[data-testid="intro-title"]') || document.querySelector('#main') || hasSide);
+            sendResponse({
+              success: true,
+              ready: true,
+              version: EXTENSION_VERSION,
+              authenticated: hasSide || isLanding,
+              qrPresent: isQr
+            });
             break;
+          }
           case 'DIAGNOSTICS':
             sendResponse({
               success: true,
