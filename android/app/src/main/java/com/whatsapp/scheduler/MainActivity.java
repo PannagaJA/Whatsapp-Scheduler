@@ -77,7 +77,10 @@ public class MainActivity extends AppCompatActivity {
             ContextCompat.getColor(this, R.color.background)
         );
 
-        swipeRefreshLayout.setOnRefreshListener(() -> webView.reload());
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            webView.clearCache(true);
+            webView.reload();
+        });
         webView.getViewTreeObserver().addOnScrollChangedListener(() -> {
             swipeRefreshLayout.setEnabled(webView.getScrollY() == 0);
         });
