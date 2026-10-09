@@ -79,6 +79,23 @@ app.get("/api/shared/:shareId", (req, res) => {
 });
 
 // API: Status & Diagnostics (returns real-time syncing progress & contact count)
+
+// API: App Version & Direct APK Download Info
+app.get("/api/version", (req, res) => {
+  let pkg = { version: "1.0.1" };
+  try {
+    pkg = require("./package.json");
+  } catch (_) {}
+  
+  const downloadUrl = process.env.APK_DOWNLOAD_URL || "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk";
+  res.json({
+    success: true,
+    version: pkg.version || "1.0.1",
+    name: "WhatsApp Scheduler",
+    downloadUrl
+  });
+});
+
 app.get("/api/status", async (req, res) => {
   try {
     const status = await getStatus();

@@ -1013,57 +1013,89 @@ document.addEventListener("DOMContentLoaded", () => {
     return false;
   }
 
-  async function checkForUpdates() {
-    try {
-      const currentVersion = (window.AndroidNative && typeof window.AndroidNative.getAppVersionName === "function")
-        ? window.AndroidNative.getAppVersionName()
-        : "1.0.0";
+    const deviceAppVersion = document.getElementById("deviceAppVersion");
+  const btnDownloadApkDirect = document.getElementById("btnDownloadApkDirect");
 
-      const res = await fetch("https://api.github.com/repos/pannagaja/Whatsapp-Scheduler/releases/latest", {
+  async function checkForUpdates() {
+    const currentVersion = (window.AndroidNative && typeof window.AndroidNative.getAppVersionName === "function")
+      ? window.AndroidNative.getAppVersionName()
+      : "1.0.0";
+
+    if (deviceAppVersion) {
+      deviceAppVersion.textContent = "Current App Version: v" + currentVersion;
+    }
+
+    let latestTag = null;
+    let apkUrl = "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk";
+    let releaseName = "New WhatsApp Scheduler Update";
+
+    // 1. Check server-side /api/version first
+    try {
+      const vRes = await fetch("/api/version");
+      const vData = await vRes.json();
+      if (vData?.success && vData.version) {
+        latestTag = vData.version;
+        if (vData.downloadUrl) apkUrl = vData.downloadUrl;
+      }
+    } catch (_) {}
+
+    // 2. Check GitHub Releases if accessible
+    try {
+      const ghRes = await fetch("https://api.github.com/repos/PannagaJA/Whatsapp-Scheduler/releases/latest", {
         headers: { "Accept": "application/vnd.github.v3+json" }
       });
-      if (!res.ok) return;
-      const release = await res.json();
-      if (!release || !release.tag_name) return;
-
-      const latestTag = release.tag_name;
-      if (isNewerVersion(latestTag, currentVersion)) {
-        let apkUrl = `https://github.com/pannagaja/Whatsapp-Scheduler/releases/download/${release.tag_name}/WhatsApp-Scheduler.apk`;
-        if (release.assets && release.assets.length > 0) {
-          const apkAsset = release.assets.find(a => a.name && a.name.toLowerCase().endsWith(".apk"));
-          if (apkAsset && apkAsset.browser_download_url) {
-            apkUrl = apkAsset.browser_download_url;
-          }
-        }
-
-        if (updateBanner && updateVersionTag) {
-          updateVersionTag.textContent = latestTag.startsWith("v") ? latestTag : `v${latestTag}`;
-          if (updateNotes && release.name) {
-            updateNotes.textContent = release.name;
-          }
-          updateBanner.style.display = "flex";
-
-          if (updateNowBtn) {
-            updateNowBtn.onclick = () => {
-              if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
-                showToast("Starting in-app download…", 3000);
-                window.AndroidNative.downloadAndInstallUpdate(apkUrl);
-              } else {
-                window.open(apkUrl, "_blank");
-              }
-            };
-          }
-
-          if (updateDismissBtn) {
-            updateDismissBtn.onclick = () => {
-              updateBanner.style.display = "none";
-            };
+      if (ghRes.ok) {
+        const release = await ghRes.json();
+        if (release && release.tag_name) {
+          latestTag = release.tag_name;
+          if (release.name) releaseName = release.name;
+          if (release.assets && release.assets.length > 0) {
+            const apkAsset = release.assets.find(a => a.name && a.name.toLowerCase().endsWith(".apk"));
+            if (apkAsset && apkAsset.browser_download_url) {
+              apkUrl = apkAsset.browser_download_url;
+            }
           }
         }
       }
     } catch (_) {}
+
+    if (btnDownloadApkDirect) {
+      btnDownloadApkDirect.onclick = () => {
+        if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
+          showToast("Starting APK download…", 3000);
+          window.AndroidNative.downloadAndInstallUpdate(apkUrl);
+        } else {
+          window.open(apkUrl, "_blank");
+        }
+      };
+    }
+
+    if (latestTag && isNewerVersion(latestTag, currentVersion)) {
+      if (updateBanner && updateVersionTag) {
+        updateVersionTag.textContent = latestTag.startsWith("v") ? latestTag : "v" + latestTag;
+        if (updateNotes) updateNotes.textContent = releaseName;
+        updateBanner.style.display = "flex";
+
+        if (updateNowBtn) {
+          updateNowBtn.onclick = () => {
+            if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
+              showToast("Starting in-app download…", 3000);
+              window.AndroidNative.downloadAndInstallUpdate(apkUrl);
+            } else {
+              window.open(apkUrl, "_blank");
+            }
+          };
+        }
+
+        if (updateDismissBtn) {
+          updateDismissBtn.onclick = () => {
+            updateBanner.style.display = "none";
+          };
+        }
+      }
+    }
   }
 
-  setTimeout(checkForUpdates, 3000);
-  setInterval(checkForUpdates, 60000);
+  setTimeout(checkForUpdates, 1500);
+  setInterval(checkForUpdates, 30000);
 });
