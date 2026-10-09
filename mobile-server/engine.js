@@ -72,23 +72,77 @@ async function initWhatsAppEngine() {
     }
   });
 
-  // Sync contacts into SQLite
+  // Helper to persist contacts into SQLite
+  async function upsertContactRecord(jid, rawName, rawPhone, isGroup = 0) {
+    if (!jid || jid === 'status@broadcast') return;
+    const isGrp = isGroup || (jid.endsWith('@g.us') ? 1 : 0);
+    const phone = rawPhone || (isGrp ? '' : jid.split('@')[0].replace(/\D/g, ''));
+    const name = rawName || '';
+    try {
+      await run(`
+        INSERT INTO contacts (jid, name, phone, is_group, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(jid) DO UPDATE SET
+          name = coalesce(nullif(excluded.name, ''), contacts.name),
+          phone = coalesce(nullif(excluded.phone, ''), contacts.phone),
+          updated_at = excluded.updated_at
+      `, [jid, name, phone, isGrp, Date.now()]);
+    } catch (_) {}
+  }
+
+  // 1. Initial Multi-Device History Sync (contains all contacts & chats)
+  sock.ev.on('messaging-history.set', async ({ contacts, chats }) => {
+    if (contacts && contacts.length) {
+      for (const c of contacts) {
+        await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
+      }
+    }
+    if (chats && chats.length) {
+      for (const ch of chats) {
+        await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
+      }
+    }
+  });
+
+  // 2. Contacts events
+  sock.ev.on('contacts.set', async ({ contacts }) => {
+    for (const c of contacts || []) {
+      await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
+    }
+  });
+
   sock.ev.on('contacts.upsert', async (contacts) => {
-    for (const c of contacts) {
-      if (!c?.id) continue;
-      const jid = c.id;
-      const name = c.name || c.notify || c.verifiedName || '';
-      const isGroup = jid.endsWith('@g.us') ? 1 : 0;
-      const phone = jid.split('@')[0].replace(/\D/g, '');
-      try {
-        await run(`
-          INSERT INTO contacts (jid, name, phone, is_group, updated_at)
-          VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(jid) DO UPDATE SET
-            name = coalesce(nullif(excluded.name, ''), contacts.name),
-            updated_at = excluded.updated_at
-        `, [jid, name, phone, isGroup, Date.now()]);
-      } catch (_) {}
+    for (const c of contacts || []) {
+      await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
+    }
+  });
+
+  sock.ev.on('contacts.update', async (updates) => {
+    for (const u of updates || []) {
+      if (u.id && (u.name || u.notify)) {
+        await upsertContactRecord(u.id, u.name || u.notify || '', null);
+      }
+    }
+  });
+
+  // 3. Chats & Groups events
+  sock.ev.on('chats.set', async ({ chats }) => {
+    for (const ch of chats || []) {
+      await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
+    }
+  });
+
+  sock.ev.on('chats.upsert', async (chats) => {
+    for (const ch of chats || []) {
+      await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
+    }
+  });
+
+  sock.ev.on('groups.update', async (updates) => {
+    for (const g of updates || []) {
+      if (g.id && g.subject) {
+        await upsertContactRecord(g.id, g.subject, null, 1);
+      }
     }
   });
 

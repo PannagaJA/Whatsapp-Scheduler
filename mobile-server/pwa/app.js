@@ -173,7 +173,25 @@
   shareDismiss.onclick = () => { shareBanner.style.display = 'none'; };
   checkIncomingShare();
 
-  // 7. Contact Autocomplete
+  // 7. Contact Autocomplete & Native Phone Contact Picker
+  const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
+  if ('contacts' in navigator && 'ContactsManager' in window) {
+    pickNativeContactBtn.style.display = 'inline-block';
+    pickNativeContactBtn.onclick = async () => {
+      try {
+        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: false });
+        if (contacts && contacts[0]) {
+          const c = contacts[0];
+          const tel = c.tel && c.tel[0] ? c.tel[0].replace(/\D/g, '') : '';
+          const name = c.name && c.name[0] ? c.name[0] : '';
+          recipientInput.value = name || tel;
+        }
+      } catch (err) {
+        console.log('Native contact picker error:', err);
+      }
+    };
+  }
+
   async function loadContacts() {
     try {
       const res = await fetch('/api/contacts');

@@ -64,7 +64,12 @@
         <form id="scheduleForm" class="schedule-card">
           <!-- Recipient -->
           <div class="form-group">
-            <label for="recipientInput">Recipient (Contact or Phone)</label>
+            <div class="section-head">
+              <label for="recipientInput">Recipient (Contact or Phone)</label>
+              <button type="button" class="btn-attach" id="pickNativeContactBtn" style="display: none;">
+                📇 Phonebook
+              </button>
+            </div>
             <div class="input-with-icon">
               <span class="input-icon">👤</span>
               <input type="text" id="recipientInput" placeholder="Name or +919876543210…" autocomplete="off" required>
