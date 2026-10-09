@@ -195,7 +195,16 @@ app.get('/api/profile-pic', async (req, res) => {
 // API: List Scheduled Messages
 app.get('/api/schedules', async (req, res) => {
   try {
-    const schedules = await all(`SELECT * FROM schedules ORDER BY scheduled_at ASC`);
+    const schedules = await all(`
+      SELECT s.*, 
+             COALESCE(c.name, '') as contact_name
+      FROM schedules s
+      LEFT JOIN contacts c ON (
+        (c.phone IS NOT NULL AND c.phone != '' AND s.recipient LIKE '%' || c.phone || '%') OR
+        (c.jid IS NOT NULL AND c.jid != '' AND s.recipient = c.jid)
+      )
+      ORDER BY s.scheduled_at ASC
+    `);
     const formatted = schedules.map(s => {
       let attachments = [];
       try { attachments = JSON.parse(s.attachments); } catch (_) {}

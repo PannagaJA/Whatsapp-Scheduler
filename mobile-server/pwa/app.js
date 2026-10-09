@@ -1,42 +1,63 @@
-(() => {
+document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
-  const headerStatus = document.getElementById('headerStatus');
-  const linkDeviceBtn = document.getElementById('linkDeviceBtn');
-  const shareBanner = document.getElementById('shareBanner');
-  const shareSummary = document.getElementById('shareSummary');
-  const shareDismiss = document.getElementById('shareDismiss');
-  
+  const paneSchedule = document.getElementById('paneSchedule');
+  const paneQueue = document.getElementById('paneQueue');
+  const paneSettings = document.getElementById('paneSettings');
+  const navItems = document.querySelectorAll('.nav-item');
+
+  const scheduleForm = document.getElementById('scheduleForm');
   const recipientInput = document.getElementById('recipientInput');
   const contactsDropdown = document.getElementById('contactsDropdown');
   const messageInput = document.getElementById('messageInput');
   const dateInput = document.getElementById('dateInput');
   const timeInput = document.getElementById('timeInput');
+  const isRecurringCheckbox = document.getElementById('isRecurring');
+  const recurrenceGroup = document.getElementById('recurrenceGroup');
+  const recurrencePattern = document.getElementById('recurrencePattern');
   const filePicker = document.getElementById('filePicker');
   const addFileBtn = document.getElementById('addFileBtn');
   const filesList = document.getElementById('filesList');
-  const scheduleForm = document.getElementById('scheduleForm');
-  const submitBtn = document.getElementById('submitScheduleBtn');
-  
+  const submitBtn = document.getElementById('submitBtn');
+
   const queueList = document.getElementById('queueList');
   const refreshQueueBtn = document.getElementById('refreshQueueBtn');
-  
-  const devicePill = document.getElementById('devicePill');
-  const deviceUserInfo = document.getElementById('deviceUserInfo');
-  const showQrBtn = document.getElementById('showQrBtn');
-  const showPairCodeBtn = document.getElementById('showPairCodeBtn');
-  const logoutBox = document.getElementById('logoutBox');
-  const logoutBtn = document.getElementById('logoutBtn');
-  
-  const qrModal = document.getElementById('qrModal');
-  const modalTitle = document.getElementById('modalTitle');
-  const modalBody = document.getElementById('modalBody');
-  const modalClose = document.getElementById('modalClose');
-  const toast = document.getElementById('toast');
+  const headerStatus = document.getElementById('headerStatus');
+  const openQrBtn = document.getElementById('openQrBtn');
+  const pairCodeBtn = document.getElementById('pairCodeBtn');
 
-  let selectedFiles = []; // File objects
-  let existingStagedFiles = []; // Staged files from /share endpoint
+  const qrModal = document.getElementById('qrModal');
+  const qrImage = document.getElementById('qrImage');
+  const qrLoading = document.getElementById('qrLoading');
+  const closeQrModal = document.getElementById('closeQrModal');
+
+  const pairModal = document.getElementById('pairModal');
+  const closePairModal = document.getElementById('closePairModal');
+  const pairPhoneInput = document.getElementById('pairPhoneInput');
+  const requestPairCodeBtn = document.getElementById('requestPairCodeBtn');
+  const pairCodeDisplay = document.getElementById('pairCodeDisplay');
+  const pairCodeResult = document.getElementById('pairCodeResult');
+
+  const syncBanner = document.getElementById('syncBanner');
+  const syncBannerText = document.getElementById('syncBannerText');
+  const syncProgressBar = document.getElementById('syncProgressBar');
+  const syncPercentBadge = document.getElementById('syncPercentBadge');
+  const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
+
+  let selectedFiles = [];
+  let stagedFiles = [];
   let allContacts = [];
-  let pollStatusTimer = null;
+  const avatarCache = new Map();
+
+  // Helper: Escape HTML
+  function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 
   // 1. Register PWA Service Worker
   if ('serviceWorker' in navigator) {
@@ -44,165 +65,184 @@
   }
 
   // 2. Toast Notification
-  function showToast(msg, duration = 3500) {
+  function showToast(msg, duration = 3000) {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
     toast.textContent = msg;
-    toast.classList.add('active');
-    setTimeout(() => toast.classList.remove('active'), duration);
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), duration);
   }
 
   // 3. Tab Switching
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      const target = document.getElementById(btn.getAttribute('data-tab'));
-      if (target) target.classList.add('active');
+  navItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const target = item.getAttribute('data-tab');
+      navItems.forEach(n => n.classList.remove('active'));
+      item.classList.add('active');
 
-      if (btn.getAttribute('data-tab') === 'paneQueue') loadSchedules();
-      if (btn.getAttribute('data-tab') === 'paneDevice') checkStatus();
-    };
+      [paneSchedule, paneQueue, paneSettings].forEach(p => p && p.classList.remove('active'));
+      const activePane = document.getElementById(target);
+      if (activePane) activePane.classList.add('active');
+
+      if (target === 'paneQueue') {
+        loadSchedules();
+      } else if (target === 'paneSchedule') {
+        loadContacts();
+      }
+    });
   });
-
-  linkDeviceBtn.onclick = () => {
-    document.querySelector('.nav-item[data-tab="paneDevice"]').click();
-  };
 
   // 4. Time Presets & Date Defaults
-  function pad(n) { return String(n).padStart(2, '0'); }
-  function setDateTime(d) {
-    dateInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    timeInput.value = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  function initDateTimeDefaults() {
+    const now = new Date();
+    dateInput.value = now.toISOString().split('T')[0];
+    
+    // Set default time: +15 minutes
+    const future = new Date(now.getTime() + 15 * 60000);
+    const hours = String(future.getHours()).padStart(2, '0');
+    const minutes = String(future.getMinutes()).padStart(2, '0');
+    timeInput.value = `${hours}:${minutes}`;
+
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const mins = parseInt(btn.getAttribute('data-mins'), 10);
+        const targetDate = new Date(Date.now() + mins * 60000);
+        dateInput.value = targetDate.toISOString().split('T')[0];
+        timeInput.value = `${String(targetDate.getHours()).padStart(2, '0')}:${String(targetDate.getMinutes()).padStart(2, '0')}`;
+      });
+    });
+
+    if (isRecurringCheckbox && recurrenceGroup) {
+      isRecurringCheckbox.addEventListener('change', () => {
+        recurrenceGroup.style.display = isRecurringCheckbox.checked ? 'block' : 'none';
+      });
+    }
   }
-
-  // Set default time: +15 minutes
-  const defDate = new Date(Date.now() + 15 * 60 * 1000);
-  setDateTime(defDate);
-
-  document.querySelectorAll('.chip[data-preset]').forEach(chip => {
-    chip.onclick = () => {
-      const preset = chip.getAttribute('data-preset');
-      const now = new Date();
-      if (preset === '15m') now.setMinutes(now.getMinutes() + 15);
-      else if (preset === '1h') now.setHours(now.getHours() + 1);
-      else if (preset === '3h') now.setHours(now.getHours() + 3);
-      else if (preset === 'tomorrow9') {
-        now.setDate(now.getDate() + 1);
-        now.setHours(9, 0, 0, 0);
-      } else if (preset === 'tomorrow18') {
-        now.setDate(now.getDate() + 1);
-        now.setHours(18, 0, 0, 0);
-      }
-      setDateTime(now);
-    };
-  });
+  initDateTimeDefaults();
 
   // 5. Attachment Handling
-  addFileBtn.onclick = () => filePicker.click();
-
-  filePicker.onchange = () => {
-    if (filePicker.files?.length) {
-      for (const f of filePicker.files) selectedFiles.push(f);
-      filePicker.value = '';
+  if (addFileBtn && filePicker) {
+    addFileBtn.onclick = () => filePicker.click();
+    filePicker.onchange = () => {
+      if (filePicker.files) {
+        for (const f of filePicker.files) {
+          selectedFiles.push(f);
+        }
+      }
       renderFiles();
-    }
-  };
+      filePicker.value = '';
+    };
+  }
 
   function renderFiles() {
-    filesList.innerHTML = '';
-    
-    // Existing staged files from native share
-    existingStagedFiles.forEach((file, idx) => {
-      const tag = document.createElement('div');
-      tag.className = 'file-tag';
-      tag.innerHTML = `
-        <span class="file-name">📎 ${file.name}</span>
-        <span class="file-remove" data-type="existing" data-idx="${idx}">✕</span>
+    if (!filesList) return;
+    filesList.textContent = '';
+
+    stagedFiles.forEach((f, idx) => {
+      const item = document.createElement('div');
+      item.className = 'file-preview-item';
+      item.innerHTML = `
+        <span>📎 ${escapeHtml(f.name || 'Shared Attachment')} (${f.size ? (f.size / 1024).toFixed(0) + 'KB' : 'File'})</span>
+        <button type="button" class="btn-remove-file" data-type="staged" data-idx="${idx}">×</button>
       `;
-      filesList.appendChild(tag);
+      filesList.appendChild(item);
     });
 
-    // Local selected files
-    selectedFiles.forEach((file, idx) => {
-      const tag = document.createElement('div');
-      tag.className = 'file-tag';
-      tag.innerHTML = `
-        <span class="file-name">📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)</span>
-        <span class="file-remove" data-type="local" data-idx="${idx}">✕</span>
+    selectedFiles.forEach((f, idx) => {
+      const item = document.createElement('div');
+      item.className = 'file-preview-item';
+      item.innerHTML = `
+        <span>📎 ${escapeHtml(f.name)} (${(f.size / 1024).toFixed(0)}KB)</span>
+        <button type="button" class="btn-remove-file" data-type="local" data-idx="${idx}">×</button>
       `;
-      filesList.appendChild(tag);
+      filesList.appendChild(item);
     });
 
-    filesList.querySelectorAll('.file-remove').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
+    filesList.querySelectorAll('.btn-remove-file').forEach(btn => {
+      btn.onclick = () => {
         const type = btn.getAttribute('data-type');
         const idx = parseInt(btn.getAttribute('data-idx'), 10);
-        if (type === 'existing') existingStagedFiles.splice(idx, 1);
-        else selectedFiles.splice(idx, 1);
+        if (type === 'staged') {
+          stagedFiles.splice(idx, 1);
+        } else {
+          selectedFiles.splice(idx, 1);
+        }
         renderFiles();
       };
     });
   }
 
   // 6. Handle Native Web Share Target API Ingestion
-  async function checkIncomingShare() {
+  async function checkSharedFiles() {
     const urlParams = new URLSearchParams(window.location.search);
-    const shareId = urlParams.get('shareId');
-    if (!shareId) return;
-
-    // Clean up URL query param
-    window.history.replaceState({}, document.title, window.location.pathname);
-
+    if (urlParams.has('shared') || urlParams.has('title') || urlParams.has('text')) {
+      const title = urlParams.get('title') || '';
+      const text = urlParams.get('text') || '';
+      const shareText = [title, text].filter(Boolean).join(' ');
+      if (shareText && messageInput) {
+        messageInput.value = shareText;
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
     try {
-      const res = await fetch(`/api/shared/${shareId}`);
+      const res = await fetch('/api/staged-files');
       const data = await res.json();
-      if (data?.success) {
-        if (data.text) messageInput.value = data.text;
-        if (data.files && data.files.length > 0) {
-          existingStagedFiles = data.files;
-          renderFiles();
-          shareSummary.textContent = `${data.files.length} file(s) attached`;
-        } else {
-          shareSummary.textContent = `Text message ready`;
-        }
-        shareBanner.style.display = 'flex';
+      if (data?.files && data.files.length > 0) {
+        stagedFiles = data.files;
+        renderFiles();
       }
     } catch (_) {}
   }
-  shareDismiss.onclick = () => { shareBanner.style.display = 'none'; };
-  checkIncomingShare();
+  checkSharedFiles();
 
-  // 7. Contact Autocomplete & Native Phone Contact Picker
-  function formatPhone(phone) {
-    if (!phone) return '';
-    const digits = String(phone).replace(/\D/g, '');
-    if (digits.length === 12 && digits.startsWith('91')) {
-      return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
-    }
+  // 7. Phone & Recipient Formatting
+  function formatPhone(phoneStr) {
+    if (!phoneStr) return '';
+    const digits = String(phoneStr).replace(/\D/g, '');
     if (digits.length === 10) {
       return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+    } else if (digits.length === 12 && digits.startsWith('91')) {
+      return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
     }
     return digits ? `+${digits}` : '';
   }
 
-  // Native Android APK Bridge integration
+  // 8. Sync Progress Bar & Native Contact Sync Bridge
+  function updateSyncProgress(percent, message, autoHide = false) {
+    if (!syncBanner) return;
+    syncBanner.style.display = 'flex';
+    if (syncProgressBar) syncProgressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+    if (syncPercentBadge) syncPercentBadge.textContent = `${Math.round(percent)}%`;
+    if (syncBannerText) syncBannerText.textContent = message;
+
+    if (autoHide && percent >= 100) {
+      setTimeout(() => {
+        syncBanner.style.display = 'none';
+        if (syncProgressBar) syncProgressBar.style.width = '0%';
+      }, 3500);
+    }
+  }
+
   window.onNativeContactsImported = async (contacts) => {
     try {
       const list = typeof contacts === 'string' ? JSON.parse(contacts) : contacts;
       if (Array.isArray(list) && list.length > 0) {
-        showToast(`Syncing ${list.length} phonebook contacts…`, 2500);
+        updateSyncProgress(25, `Reading ${list.length} contacts from phonebook…`);
+        updateSyncProgress(60, `Uploading ${list.length} contacts to database…`);
         const res = await fetch('/api/contacts/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contacts: list })
         });
         const data = await res.json();
+        updateSyncProgress(90, `Refreshing contact lists…`);
         await loadContacts();
-        showToast(`✓ Synced ${data.count || list.length} contacts from phone!`, 3500);
-        if (typeof renderContactSuggestions === 'function') {
-          renderContactSuggestions(recipientInput.value);
-        }
+        const count = data.count || list.length;
+        updateSyncProgress(100, `✓ Synced all ${count} contacts with exact names!`, true);
+        showToast(`✓ Imported ${count} contacts with exact phonebook names!`, 4000);
+        renderContactSuggestions(recipientInput.value);
       } else {
         showToast('No phonebook contacts found on device.');
       }
@@ -212,17 +252,19 @@
     }
   };
 
-  const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
-
   if (pickNativeContactBtn) {
     pickNativeContactBtn.onclick = async () => {
-      // 1. Check if running inside Native Android APK (1-tap full sync!)
+      if (headerStatus && !headerStatus.classList.contains('connected')) {
+        showToast('Please connect WhatsApp first before syncing contacts.');
+        return;
+      }
+
       if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === 'function') {
+        updateSyncProgress(10, 'Requesting Android phonebook permission…');
         window.AndroidNative.importAllContacts();
         return;
       }
 
-      // 2. Fallback to Web Contact Picker (in Chrome / Safari)
       if (navigator.contacts && typeof navigator.contacts.select === 'function') {
         try {
           const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
@@ -237,104 +279,32 @@
                   formatted.push({ name, phone: digits });
                 }
               }
-              if (telList.length === 0 && name) {
-                formatted.push({ name, phone: '' });
-              }
             }
 
             if (formatted.length > 0) {
-              showToast(`Importing ${formatted.length} contact(s)…`, 2000);
-              
-              try {
-                const res = await fetch('/api/contacts/import', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ contacts: formatted })
-                });
-                const data = await res.json();
-                await loadContacts();
-                
-                if (formatted.length === 1) {
-                  const first = formatted[0];
-                  recipientInput.value = first.name || formatPhone(first.phone);
-                }
-                
-                showToast(`✓ Imported ${data.count || formatted.length} contacts with names!`);
-                renderContactSuggestions(recipientInput.value);
-              } catch (err) {
-                showToast(`Sync error: ${err.message}`);
-              }
+              updateSyncProgress(40, `Importing ${formatted.length} contacts…`);
+              const res = await fetch('/api/contacts/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contacts: formatted })
+              });
+              const data = await res.json();
+              await loadContacts();
+              updateSyncProgress(100, `✓ Synced ${data.count || formatted.length} contacts!`, true);
+              showToast(`✓ Imported ${data.count || formatted.length} contacts with names!`);
+              renderContactSuggestions(recipientInput.value);
             }
           }
         } catch (err) {
-          console.log('Native contact picker cancelled/error:', err);
+          console.log('Contact picker cancelled/error:', err);
         }
       } else {
-        showToast('Tip: Install the Android APK for 1-tap full phonebook sync, or use the Import (.vcf) button.');
+        showToast('Tip: Install the Android APK for 1-tap full phonebook sync.');
       }
     };
   }
 
-  const importAllVcfBtn = document.getElementById('importAllVcfBtn');
-  const vcfFileInput = document.getElementById('vcfFileInput');
-
-  if (importAllVcfBtn && vcfFileInput) {
-    importAllVcfBtn.onclick = () => {
-      vcfFileInput.click();
-    };
-
-    vcfFileInput.onchange = async () => {
-      const file = vcfFileInput.files?.[0];
-      if (!file) return;
-      try {
-        const text = await file.text();
-        const imported = [];
-        const lines = text.split(/\r?\n/);
-        let currentName = '';
-        let currentTel = '';
-        
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
-          if (line.startsWith('FN:') || line.startsWith('FN;')) {
-            currentName = line.replace(/^FN[^:]*:/i, '').trim();
-          } else if (!currentName && (line.startsWith('N:') || line.startsWith('N;'))) {
-            const parts = line.replace(/^N[^:]*:/i, '').split(';').filter(Boolean);
-            currentName = parts.reverse().join(' ').trim();
-          } else if (line.toUpperCase().includes('TEL')) {
-            const telPart = line.split(':')[1]?.trim() || '';
-            const digits = telPart.replace(/\D/g, '');
-            if (digits.length >= 7) currentTel = digits;
-          } else if (line.toUpperCase().startsWith('END:VCARD')) {
-            if (currentTel) {
-              imported.push({ name: currentName, phone: currentTel });
-            }
-            currentName = '';
-            currentTel = '';
-          }
-        }
-
-        if (imported.length > 0) {
-          showToast(`Importing ${imported.length} contacts…`, 2000);
-          const res = await fetch('/api/contacts/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contacts: imported })
-          });
-          const data = await res.json();
-          await loadContacts();
-          showToast(`✓ Successfully imported ${data.count || imported.length} contacts!`, 4000);
-          renderContactSuggestions(recipientInput.value);
-        } else {
-          showToast('No valid contacts found in the selected file');
-        }
-      } catch (err) {
-        showToast(`Failed to parse contacts: ${err.message}`);
-      } finally {
-        vcfFileInput.value = '';
-      }
-    };
-  }
-
+  // 9. Contact Autocomplete Engine
   async function loadContacts() {
     try {
       const res = await fetch('/api/contacts');
@@ -343,10 +313,7 @@
     } catch (_) {}
   }
   loadContacts();
-  // Poll contacts every 10 seconds while on schedule tab
   setInterval(loadContacts, 10000);
-
-  const avatarCache = new Map();
 
   async function loadAvatar(jid, el) {
     if (!jid || jid.includes('@broadcast')) return;
@@ -378,6 +345,7 @@
   }
 
   function renderContactSuggestions(filter = '') {
+    if (!contactsDropdown) return;
     const q = filter.trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
     let matches = [];
@@ -418,7 +386,6 @@
       return;
     }
 
-    // Header
     const headEl = document.createElement('div');
     headEl.style.cssText = 'padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;';
     const headTitle = document.createElement('span');
@@ -429,80 +396,50 @@
     headEl.appendChild(headCount);
     contactsDropdown.appendChild(headEl);
 
-    // List items created via DOM elements
     matches.forEach(c => {
-      const hasName = Boolean(c.name && c.name.trim());
-      const formattedNumber = formatPhone(c.phone);
-      const displayName = hasName ? c.name : (formattedNumber || (c.jid ? c.jid.split('@')[0] : ''));
-
       const item = document.createElement('div');
       item.className = 'suggestion-item';
-      item.setAttribute('data-jid', c.jid || '');
-      item.setAttribute('data-display', displayName);
 
-      // Avatar
-      const avatarEl = document.createElement('div');
-      avatarEl.className = 'suggestion-avatar';
-      avatarEl.setAttribute('data-jid', c.jid || '');
+      const avatar = document.createElement('div');
+      avatar.className = 'suggestion-avatar';
+      avatar.textContent = c.is_group ? '👥' : '👤';
+      if (c.jid) loadAvatar(c.jid, avatar);
 
-      const cachedUrl = c.jid ? avatarCache.get(c.jid) : null;
-      if (cachedUrl) {
-        const img = document.createElement('img');
-        img.src = cachedUrl;
-        img.alt = '';
-        avatarEl.appendChild(img);
-      } else {
-        avatarEl.textContent = c.is_group ? '👥' : '👤';
-      }
+      const info = document.createElement('div');
+      info.className = 'suggestion-info';
 
-      // Details
-      const detailsEl = document.createElement('div');
-      detailsEl.className = 'suggestion-details';
-
-      const nameEl = document.createElement('span');
+      const nameEl = document.createElement('div');
       nameEl.className = 'suggestion-name';
-      nameEl.textContent = displayName;
+      nameEl.textContent = c.name || (c.is_group ? 'WhatsApp Group' : 'Contact');
 
-      const phoneEl = document.createElement('span');
+      const phoneEl = document.createElement('div');
       phoneEl.className = 'suggestion-phone';
-      if (c.is_group) {
-        phoneEl.textContent = 'WhatsApp Group';
-      } else if (hasName && formattedNumber) {
-        phoneEl.textContent = formattedNumber;
-      } else {
-        phoneEl.textContent = 'WhatsApp Chat';
-      }
+      phoneEl.textContent = c.is_group ? 'Group Chat' : formatPhone(c.phone);
 
-      detailsEl.appendChild(nameEl);
-      detailsEl.appendChild(phoneEl);
-
-      item.appendChild(avatarEl);
-      item.appendChild(detailsEl);
+      info.appendChild(nameEl);
+      info.appendChild(phoneEl);
+      item.appendChild(avatar);
+      item.appendChild(info);
 
       item.onclick = () => {
-        if (c.jid) recipientInput.dataset.jid = c.jid;
-        recipientInput.value = displayName;
+        recipientInput.value = c.is_group ? c.name : (c.name ? `${c.name} (${formatPhone(c.phone)})` : formatPhone(c.phone));
+        recipientInput.setAttribute('data-jid', c.jid || '');
+        recipientInput.setAttribute('data-phone', c.phone || '');
         contactsDropdown.style.display = 'none';
       };
 
       contactsDropdown.appendChild(item);
-
-      if (c.jid && !avatarCache.has(c.jid)) {
-        loadAvatar(c.jid, avatarEl);
-      }
     });
 
     contactsDropdown.style.display = 'block';
   }
 
-  recipientInput.onfocus = () => {
-    loadContacts().then(() => renderContactSuggestions(recipientInput.value));
-  };
-
-  recipientInput.oninput = () => {
-    delete recipientInput.dataset.jid;
+  recipientInput.addEventListener('focus', () => renderContactSuggestions(recipientInput.value));
+  recipientInput.addEventListener('input', () => {
+    recipientInput.removeAttribute('data-jid');
+    recipientInput.removeAttribute('data-phone');
     renderContactSuggestions(recipientInput.value);
-  };
+  });
 
   document.addEventListener('click', (e) => {
     if (!recipientInput.contains(e.target) && !contactsDropdown.contains(e.target)) {
@@ -510,62 +447,90 @@
     }
   });
 
-  // 8. Submit Schedule Form
+  // 10. Submit Schedule Form
   scheduleForm.onsubmit = async (e) => {
     e.preventDefault();
-    const recipient = recipientInput.dataset.jid || recipientInput.value.trim();
+    const rawRecipient = recipientInput.value.trim();
+    const boundJid = recipientInput.getAttribute('data-jid');
+    const boundPhone = recipientInput.getAttribute('data-phone');
+
+    let recipient = rawRecipient;
+    if (boundJid) {
+      recipient = boundJid;
+    } else if (boundPhone) {
+      recipient = boundPhone;
+    } else {
+      const match = allContacts.find(c => (c.name && c.name.toLowerCase() === rawRecipient.toLowerCase()) || c.phone === rawRecipient.replace(/\D/g, ''));
+      if (match) {
+        recipient = match.jid || match.phone;
+      }
+    }
+
     const text = messageInput.value.trim();
     const dateVal = dateInput.value;
     const timeVal = timeInput.value;
+    const isRecurring = isRecurringCheckbox?.checked;
+    const pattern = isRecurring ? recurrencePattern?.value : null;
 
-    if (!recipient) return showToast('Please enter recipient');
-    if (!text && selectedFiles.length === 0 && existingStagedFiles.length === 0) {
-      return showToast('Please enter a message or attach a file');
+    if (!recipient) {
+      showToast('Please enter a valid recipient or select from dropdown.');
+      return;
     }
-    if (!dateVal || !timeVal) return showToast('Please select date and time');
+    if (!text && selectedFiles.length === 0 && stagedFiles.length === 0) {
+      showToast('Please enter a message text or attach at least one file.');
+      return;
+    }
+    if (!dateVal || !timeVal) {
+      showToast('Please select scheduled date and time.');
+      return;
+    }
 
-    const scheduledAt = new Date(`${dateVal}T${timeVal}`).getTime();
-    if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
-      return showToast('Scheduled time must be in the future');
+    const scheduledDate = new Date(`${dateVal}T${timeVal}`);
+    const scheduledAt = scheduledDate.getTime();
+
+    if (scheduledAt <= Date.now()) {
+      showToast('Scheduled time must be in the future.');
+      return;
     }
 
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<span>Saving schedule…</span>';
+    submitBtn.innerHTML = '<span>Scheduling…</span>';
 
     try {
       const formData = new FormData();
       formData.append('recipient', recipient);
       formData.append('text', text);
-      formData.append('scheduledAt', String(scheduledAt));
-
-      if (existingStagedFiles.length > 0) {
-        formData.append('existingFiles', JSON.stringify(existingStagedFiles));
+      formData.append('scheduledAt', scheduledAt);
+      if (isRecurring && pattern) {
+        formData.append('isRecurring', 'true');
+        formData.append('recurrencePattern', pattern);
       }
 
-      for (const file of selectedFiles) {
-        formData.append('attachments', file);
+      selectedFiles.forEach(f => formData.append('attachments', f));
+      if (stagedFiles.length > 0) {
+        formData.append('stagedAttachments', JSON.stringify(stagedFiles));
       }
 
       const res = await fetch('/api/schedules', {
         method: 'POST',
         body: formData
       });
-
       const data = await res.json();
-      if (!data?.success) throw new Error(data?.error || 'Failed to schedule');
 
-      showToast(`Scheduled for ${new Date(scheduledAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-      
-      // Reset form
-      messageInput.value = '';
-      selectedFiles = [];
-      existingStagedFiles = [];
-      shareBanner.style.display = 'none';
-      renderFiles();
-      setDateTime(new Date(Date.now() + 15 * 60 * 1000));
-      
-      // Switch to Queue tab
-      document.querySelector('.nav-item[data-tab="paneQueue"]').click();
+      if (data.success) {
+        showToast('✓ Message Scheduled Successfully!');
+        messageInput.value = '';
+        selectedFiles = [];
+        stagedFiles = [];
+        renderFiles();
+        recipientInput.removeAttribute('data-jid');
+        recipientInput.removeAttribute('data-phone');
+
+        const queueTab = document.querySelector('.nav-item[data-tab="paneQueue"]');
+        if (queueTab) queueTab.click();
+      } else {
+        showToast(`Schedule Failed: ${data.error}`);
+      }
     } catch (err) {
       showToast(`Error: ${err.message}`);
     } finally {
@@ -574,7 +539,7 @@
     }
   };
 
-  // 9. Queue Management
+  // 11. Queue Management & Recipient Formatting
   async function loadSchedules() {
     try {
       const res = await fetch('/api/schedules');
@@ -592,16 +557,30 @@
         });
         const files = job.attachments || [];
 
+        // Match contact name from server response or cached contacts
+        let contactName = job.contact_name || '';
+        const digits = (job.recipient || '').replace(/\D/g, '');
+        if (!contactName && digits && allContacts.length > 0) {
+          const match = allContacts.find(c => c.phone && (digits.endsWith(c.phone) || c.phone.endsWith(digits)));
+          if (match && match.name && match.name !== match.phone) {
+            contactName = match.name;
+          }
+        }
+        const formattedPhone = digits ? formatPhone(digits) : job.recipient;
+
         return `
           <div class="job-card">
             <div class="job-head">
-              <span class="job-recipient">To: ${job.recipient}</span>
+              <div class="job-recipient-container">
+                ${contactName ? `<span class="job-recipient-name">👤 ${escapeHtml(contactName)}</span>` : ''}
+                <span class="job-recipient-phone">📞 ${escapeHtml(formattedPhone)}</span>
+              </div>
               <span class="job-status-badge ${job.status}">${job.status}</span>
             </div>
-            ${job.text ? `<div class="job-text">${job.text}</div>` : ''}
+            ${job.text ? `<div class="job-text">${escapeHtml(job.text)}</div>` : ''}
             ${files.length > 0 ? `
               <div class="job-files">
-                ${files.map(f => `<span class="job-file-pill">📎 ${f.name}</span>`).join('')}
+                ${files.map(f => `<span class="job-file-pill">📎 ${escapeHtml(f.name || 'File')}</span>`).join('')}
               </div>
             ` : ''}
             <div class="job-foot">
@@ -632,12 +611,9 @@
     }
   }
 
-  refreshQueueBtn.onclick = loadSchedules;
+  if (refreshQueueBtn) refreshQueueBtn.onclick = loadSchedules;
 
-  const syncBanner = document.getElementById('syncBanner');
-  const syncBannerText = document.getElementById('syncBannerText');
-
-  // 10. Connection Status & Pairing
+  // 12. Connection Status & Pairing
   async function checkStatus() {
     try {
       const res = await fetch('/api/status');
@@ -647,19 +623,32 @@
       const isSyncing = Boolean(data.syncing);
 
       headerStatus.className = `status-indicator ${data.status}`;
+      
+      if (pickNativeContactBtn) {
+        if (isConn) {
+          pickNativeContactBtn.disabled = false;
+          pickNativeContactBtn.removeAttribute('disabled');
+          pickNativeContactBtn.classList.remove('btn-disabled');
+          pickNativeContactBtn.title = "Sync contacts from phonebook";
+        } else {
+          pickNativeContactBtn.disabled = true;
+          pickNativeContactBtn.setAttribute('disabled', 'true');
+          pickNativeContactBtn.classList.add('btn-disabled');
+          pickNativeContactBtn.title = "Connect WhatsApp first to sync phonebook";
+        }
+      }
+
       if (isConn) {
         if (isSyncing) {
           headerStatus.querySelector('.status-text').innerHTML = `Connected <span class="sync-spinner-inline"></span>`;
-          if (syncBanner) {
-            syncBanner.style.display = 'flex';
-            if (syncBannerText) syncBannerText.textContent = `Syncing WhatsApp contacts & chats…`;
-          }
+          updateSyncProgress(85, 'Syncing WhatsApp contacts & history…');
         } else {
           headerStatus.querySelector('.status-text').textContent = 'Connected';
-          if (syncBanner) syncBanner.style.display = 'none';
+          if (syncBanner && syncBannerText && syncBannerText.textContent.includes('Syncing WhatsApp')) {
+            updateSyncProgress(100, '✓ WhatsApp Contacts Synced', true);
+          }
         }
 
-        // Auto-close QR / Pairing modal when scanned & connected
         if (qrModal.classList.contains('active')) {
           qrModal.classList.remove('active');
           showToast('✓ WhatsApp Connected Successfully!');
@@ -667,107 +656,83 @@
           if (schedTab) schedTab.click();
         }
       } else {
-        if (syncBanner) syncBanner.style.display = 'none';
-        headerStatus.querySelector('.status-text').textContent = data.status === 'qr' ? 'Scan QR' : 'Disconnected';
+        headerStatus.querySelector('.status-text').textContent = data.status === 'connecting' ? 'Connecting…' : 'Disconnected';
       }
-
-      devicePill.textContent = `Status: ${data.status.toUpperCase()}`;
-      devicePill.style.color = isConn ? 'var(--accent)' : 'var(--warning)';
-
-      if (isConn && data.user) {
-        deviceUserInfo.innerHTML = `Linked as: <strong>${data.user.name}</strong> (${data.user.id.split(':')[0]})`;
-        logoutBox.style.display = 'block';
-      } else {
-        deviceUserInfo.textContent = 'Not linked to any WhatsApp account.';
-        logoutBox.style.display = 'none';
-      }
-
-      return data;
     } catch (_) {
       headerStatus.className = 'status-indicator disconnected';
-      headerStatus.querySelector('.status-text').textContent = 'Server Offline';
-      if (syncBanner) syncBanner.style.display = 'none';
+      headerStatus.querySelector('.status-text').textContent = 'Offline';
     }
   }
 
   checkStatus();
-  // Poll faster (every 2.5 seconds) for snappy QR detection and sync feedback
   setInterval(checkStatus, 2500);
 
-  // QR Modal
-  showQrBtn.onclick = async () => {
-    const data = await checkStatus();
-    modalTitle.textContent = 'Scan QR Code';
-    modalHelp.textContent = 'Open WhatsApp on your phone > Settings > Linked Devices > Link a Device';
-    
-    if (data?.qr) {
-      modalBody.innerHTML = `
-        <div class="qr-wrap">
-          <img src="${data.qr}" alt="WhatsApp QR Code">
-        </div>
-        <p class="modal-help">${modalHelp.textContent}</p>
-      `;
-    } else if (data?.status === 'connected') {
-      modalBody.innerHTML = `<p class="modal-help" style="color:var(--accent);font-weight:600;">✓ WhatsApp is already connected and ready!</p>`;
-    } else {
-      modalBody.innerHTML = `<p class="modal-help">Generating QR code, please wait a moment…</p>`;
-    }
-    qrModal.classList.add('active');
-  };
+  // 13. QR Modal & Pairing Handlers
+  if (openQrBtn) {
+    openQrBtn.onclick = async () => {
+      qrModal.classList.add('active');
+      qrLoading.style.display = 'block';
+      qrImage.style.display = 'none';
 
-  // 8-Digit Pairing Code Modal
-  showPairCodeBtn.onclick = () => {
-    modalTitle.textContent = 'Link via Phone Number';
-    modalBody.innerHTML = `
-      <div class="form-group" style="margin-bottom:14px;">
-        <label>Your Phone Number (with Country Code)</label>
-        <input type="text" id="pairPhoneInput" placeholder="+919876543210" style="margin-top:4px;">
-      </div>
-      <button type="button" class="btn-primary" id="requestPairBtn" style="margin-top:0;">
-        Get 8-Digit Code
-      </button>
-      <div id="pairCodeResult" style="margin-top:14px;"></div>
-      <p class="modal-help" style="margin-top:12px;">Open WhatsApp > Settings > Linked Devices > Link with phone number instead</p>
-    `;
+      try {
+        const res = await fetch('/api/qr');
+        const data = await res.json();
+        if (data.qr) {
+          qrImage.src = data.qr;
+          qrImage.style.display = 'block';
+          qrLoading.style.display = 'none';
+        } else {
+          qrLoading.textContent = data.connected ? 'Already Connected!' : 'Generating QR Code…';
+        }
+      } catch (_) {
+        qrLoading.textContent = 'Failed to load QR code.';
+      }
+    };
+  }
 
-    document.getElementById('requestPairBtn').onclick = async () => {
-      const phone = document.getElementById('pairPhoneInput').value.trim();
-      if (!phone) return showToast('Enter phone number');
-      const resultEl = document.getElementById('pairCodeResult');
-      resultEl.innerHTML = '<span style="color:var(--text-secondary)">Generating pairing code…</span>';
+  if (closeQrModal) closeQrModal.onclick = () => qrModal.classList.remove('active');
+
+  if (pairCodeBtn) {
+    pairCodeBtn.onclick = () => {
+      pairModal.classList.add('active');
+      pairCodeDisplay.style.display = 'none';
+      pairPhoneInput.value = '';
+    };
+  }
+
+  if (closePairModal) closePairModal.onclick = () => pairModal.classList.remove('active');
+
+  if (requestPairCodeBtn) {
+    requestPairCodeBtn.onclick = async () => {
+      const phone = pairPhoneInput.value.trim().replace(/\D/g, '');
+      if (!phone || phone.length < 10) {
+        showToast('Please enter a valid phone number with country code (e.g. 919876543210)');
+        return;
+      }
+
+      requestPairCodeBtn.disabled = true;
+      requestPairCodeBtn.textContent = 'Requesting…';
 
       try {
         const res = await fetch('/api/pair-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: phone })
+          body: JSON.stringify({ phone })
         });
         const data = await res.json();
-        if (data.code) {
-          resultEl.innerHTML = `
-            <div class="pair-code-display">${data.code}</div>
-            <p style="text-align:center;font-size:12px;color:var(--text-secondary);">Enter this code on your WhatsApp phone notification.</p>
-          `;
+
+        if (data.success && data.code) {
+          pairCodeResult.textContent = data.code;
+          pairCodeDisplay.style.display = 'block';
         } else {
-          resultEl.innerHTML = `<span style="color:var(--danger)">${data.error || 'Failed to get code'}</span>`;
+          showToast(data.error || 'Failed to generate pairing code');
         }
       } catch (err) {
-        resultEl.innerHTML = `<span style="color:var(--danger)">Error: ${err.message}</span>`;
+        showToast(`Error: ${err.message}`);
+      } finally {
+        requestPairCodeBtn.disabled = false;
+        requestPairCodeBtn.textContent = 'Get 8-Digit Pairing Code';
       }
     };
-
-    qrModal.classList.add('active');
-  };
-
-  modalClose.onclick = () => qrModal.classList.remove('active');
-  qrModal.onclick = (e) => { if (e.target === qrModal) qrModal.classList.remove('active'); };
-
-  logoutBtn.onclick = async () => {
-    if (!confirm('Unlink this WhatsApp session?')) return;
-    try {
-      await fetch('/api/logout', { method: 'POST' });
-      showToast('WhatsApp account unlinked');
-      checkStatus();
-    } catch (_) {}
-  };
-})();
+  }
+});
