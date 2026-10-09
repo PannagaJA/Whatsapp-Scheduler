@@ -72,10 +72,11 @@
           <div class="form-group">
             <div class="section-head">
               <label for="recipientInput">Recipient (Contact or Phone)</label>
-              <button type="button" class="btn-attach" id="pickNativeContactBtn" style="display: none;">
+              <button type="button" class="btn-attach" id="pickNativeContactBtn">
                 📇 Phonebook
               </button>
             </div>
+            <input type="file" id="vcfPicker" accept=".vcf,.csv" style="display: none;">
             <div class="input-with-icon">
               <span class="input-icon">👤</span>
               <input type="text" id="recipientInput" placeholder="Name or +919876543210…" autocomplete="off" required>

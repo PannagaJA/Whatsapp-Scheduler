@@ -187,36 +187,120 @@
   }
 
   const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
-  if ('contacts' in navigator && 'ContactsManager' in window) {
-    pickNativeContactBtn.style.display = 'inline-block';
+  const vcfPicker = document.getElementById('vcfPicker');
+
+  if (pickNativeContactBtn) {
     pickNativeContactBtn.onclick = async () => {
-      try {
-        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
-        if (contacts && contacts.length > 0) {
-          const formatted = [];
-          for (const c of contacts) {
-            const name = c.name && c.name[0] ? c.name[0] : '';
-            const tel = c.tel && c.tel[0] ? c.tel[0].replace(/\D/g, '') : '';
-            if (tel) formatted.push({ name, phone: tel });
+      // 1. Try Native Mobile Contact Picker API (Chrome on Android / PWA)
+      if (navigator.contacts && typeof navigator.contacts.select === 'function') {
+        try {
+          const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+          if (contacts && contacts.length > 0) {
+            const formatted = [];
+            for (const c of contacts) {
+              const name = c.name && c.name[0] ? c.name[0].trim() : '';
+              const telList = c.tel || [];
+              for (const t of telList) {
+                const digits = String(t).replace(/\D/g, '');
+                if (digits.length >= 7) {
+                  formatted.push({ name, phone: digits });
+                }
+              }
+              if (telList.length === 0 && name) {
+                formatted.push({ name, phone: '' });
+              }
+            }
+
+            if (formatted.length > 0) {
+              showToast(`Importing ${formatted.length} contact(s)…`, 2000);
+              
+              try {
+                const res = await fetch('/api/contacts/import', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ contacts: formatted })
+                });
+                const data = await res.json();
+                await loadContacts();
+                
+                if (formatted.length === 1) {
+                  const first = formatted[0];
+                  recipientInput.value = first.name || formatPhone(first.phone);
+                }
+                
+                showToast(`✓ Imported ${data.count || formatted.length} contacts with names!`);
+                renderContactSuggestions(recipientInput.value);
+              } catch (err) {
+                showToast(`Sync error: ${err.message}`);
+              }
+              return;
+            }
           }
+        } catch (err) {
+          console.log('Native contact picker cancelled/error:', err);
+        }
+      }
 
-          if (formatted.length > 0) {
-            // Pick first contact for the input
-            const first = formatted[0];
-            recipientInput.value = first.name || formatPhone(first.phone);
+      // 2. Fallback: Prompt to import vCard (.vcf) or CSV file from phone contacts
+      if (vcfPicker) {
+        showToast('Select a .vcf / contacts export file from your phone', 3500);
+        vcfPicker.click();
+      }
+    };
+  }
 
-            // Import all selected contacts to server database in background
-            fetch('/api/contacts/import', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contacts: formatted })
-            }).then(() => loadContacts()).catch(() => {});
-
-            showToast(`✓ Selected ${first.name || formatPhone(first.phone)}`);
+  // Handle .vcf / .csv file upload
+  if (vcfPicker) {
+    vcfPicker.onchange = async () => {
+      const file = vcfPicker.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const imported = [];
+        
+        // Comprehensive vCard parser (FN:, N:, TEL...)
+        const lines = text.split(/\r?\n/);
+        let currentName = '';
+        let currentTel = '';
+        
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (line.startsWith('FN:') || line.startsWith('FN;')) {
+            currentName = line.replace(/^FN[^:]*:/i, '').trim();
+          } else if (!currentName && (line.startsWith('N:') || line.startsWith('N;'))) {
+            const parts = line.replace(/^N[^:]*:/i, '').split(';').filter(Boolean);
+            currentName = parts.reverse().join(' ').trim();
+          } else if (line.toUpperCase().includes('TEL')) {
+            const telPart = line.split(':')[1]?.trim() || '';
+            const digits = telPart.replace(/\D/g, '');
+            if (digits.length >= 7) currentTel = digits;
+          } else if (line.toUpperCase().startsWith('END:VCARD')) {
+            if (currentTel) {
+              imported.push({ name: currentName, phone: currentTel });
+            }
+            currentName = '';
+            currentTel = '';
           }
         }
+
+        if (imported.length > 0) {
+          showToast(`Importing ${imported.length} contacts…`, 2000);
+          const res = await fetch('/api/contacts/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contacts: imported })
+          });
+          const data = await res.json();
+          await loadContacts();
+          showToast(`✓ Successfully imported ${data.count || imported.length} contacts!`);
+          renderContactSuggestions(recipientInput.value);
+        } else {
+          showToast('No valid contacts found in file');
+        }
       } catch (err) {
-        console.log('Native contact picker error:', err);
+        showToast(`Failed to parse contacts: ${err.message}`);
+      } finally {
+        vcfPicker.value = '';
       }
     };
   }
