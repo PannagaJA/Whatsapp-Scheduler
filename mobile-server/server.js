@@ -111,13 +111,12 @@ app.post('/api/logout', async (req, res) => {
 app.get('/api/contacts', async (req, res) => {
   try {
     const contacts = await all(`
-      SELECT jid, name, phone, is_group 
+      SELECT jid, coalesce(nullif(name, ''), phone, jid) as name, phone, is_group 
       FROM contacts 
-      WHERE (name IS NOT NULL AND name != '') OR is_group = 1 
-      ORDER BY name ASC 
-      LIMIT 300
+      ORDER BY is_group DESC, updated_at DESC, name ASC 
+      LIMIT 500
     `);
-    res.json({ success: true, contacts });
+    res.json({ success: true, contacts, count: contacts.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
