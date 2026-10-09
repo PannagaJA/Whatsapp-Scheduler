@@ -2,13 +2,15 @@ services:
   - type: web
     name: whatsapp-scheduler-mobile
     env: node
-    plan: free
+    rootDir: mobile-server
     buildCommand: npm install
     startCommand: node server.js
     disk:
       name: scheduler-data
-      mountPath: /app/data
+      mountPath: /var/data
       sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATA_DIR
+        value: /var/data
