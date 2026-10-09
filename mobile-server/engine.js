@@ -118,8 +118,8 @@ async function initWhatsAppEngine() {
     } catch (_) {}
   }
 
-  // 1. Initial Multi-Device History Sync (contains all contacts & chats)
-  sock.ev.on('messaging-history.set', async ({ contacts, chats }) => {
+  // 1. Initial Multi-Device History Sync (contains all contacts, chats & messages)
+  sock.ev.on('messaging-history.set', async ({ contacts, chats, messages }) => {
     if (contacts && contacts.length) {
       for (const c of contacts) {
         await upsertContactRecord(c.id, c.name || c.notify || c.verifiedName || '', null);
@@ -128,6 +128,19 @@ async function initWhatsAppEngine() {
     if (chats && chats.length) {
       for (const ch of chats) {
         await upsertContactRecord(ch.id, ch.name || '', null, ch.id?.endsWith('@g.us') ? 1 : 0);
+      }
+    }
+    if (messages && messages.length) {
+      for (const m of messages) {
+        if (!m.key) continue;
+        const jid = m.key.remoteJid;
+        const sender = m.key.participant || jid;
+        const pushName = m.pushName || '';
+        if (jid && !jid.endsWith('@g.us')) {
+          await upsertContactRecord(jid, pushName, null, 0);
+        } else if (sender && !sender.endsWith('@g.us')) {
+          await upsertContactRecord(sender, pushName, null, 0);
+        }
       }
     }
   });
@@ -176,11 +189,15 @@ async function initWhatsAppEngine() {
 
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const m of messages || []) {
-      if (!m.key?.remoteJid) continue;
+      if (!m.key) continue;
       const jid = m.key.remoteJid;
-      const isGrp = jid.endsWith('@g.us') ? 1 : 0;
-      const name = m.pushName || '';
-      await upsertContactRecord(jid, name, null, isGrp);
+      const sender = m.key.participant || jid;
+      const pushName = m.pushName || '';
+      if (jid && !jid.endsWith('@g.us')) {
+        await upsertContactRecord(jid, pushName, null, 0);
+      } else if (sender && !sender.endsWith('@g.us')) {
+        await upsertContactRecord(sender, pushName, null, 0);
+      }
     }
   });
 

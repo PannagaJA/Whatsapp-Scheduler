@@ -240,9 +240,11 @@
     let matches = [];
 
     if (!q) {
-      matches = allContacts.slice(0, 10);
+      const people = allContacts.filter(c => !c.is_group);
+      const groups = allContacts.filter(c => c.is_group);
+      matches = [...people, ...groups].slice(0, 20);
     } else {
-      matches = allContacts.filter(c => {
+      const filtered = allContacts.filter(c => {
         const cName = (c.name || '').toLowerCase();
         const cPhone = (c.phone || '').replace(/\D/g, '');
         if (cName.includes(q)) return true;
@@ -252,7 +254,10 @@
           if (cPhone.startsWith('91') && cPhone.slice(2).includes(qDigits)) return true;
         }
         return false;
-      }).slice(0, 10);
+      });
+      const people = filtered.filter(c => !c.is_group);
+      const groups = filtered.filter(c => c.is_group);
+      matches = [...people, ...groups].slice(0, 20);
     }
 
     contactsDropdown.textContent = '';

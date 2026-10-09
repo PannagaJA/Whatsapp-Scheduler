@@ -114,8 +114,8 @@ app.get('/api/contacts', async (req, res) => {
       SELECT jid, coalesce(nullif(name, ''), phone, '') as name, phone, is_group 
       FROM contacts 
       WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
-      ORDER BY updated_at DESC, name ASC 
-      LIMIT 500
+      ORDER BY is_group ASC, updated_at DESC, name ASC 
+      LIMIT 1000
     `);
     res.json({ success: true, contacts, count: contacts.length });
   } catch (err) {
