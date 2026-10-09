@@ -88,6 +88,18 @@
       <!-- Tab 1: Schedule Form -->
       <section class="tab-pane active" id="paneSchedule">
         <form id="scheduleForm" class="schedule-card">
+          <!-- Mandatory Phonebook Sync Gate Card -->
+          <div class="phonebook-gate-card" id="phonebookGateCard" style="display: none;">
+            <div class="gate-icon-wrap">📇</div>
+            <div class="gate-text-wrap">
+              <div class="gate-title">Step 2: Sync Phonebook Contacts</div>
+              <div class="gate-desc">Sync device contacts to unlock contact selection and scheduling.</div>
+            </div>
+            <button type="button" class="btn-gate-sync" id="btnGateSyncPhonebook">
+              <span>Sync Now</span>
+            </button>
+          </div>
+
           <!-- Sync Banner with Progress Percentage -->
           <div class="sync-banner" id="syncBanner" role="status" style="display: none;">
             <div class="sync-banner-header">

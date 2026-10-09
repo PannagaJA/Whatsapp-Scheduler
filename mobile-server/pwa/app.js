@@ -19,6 +19,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const filesList = document.getElementById("filesList");
   const submitScheduleBtn = document.getElementById("submitScheduleBtn");
   const pickNativeContactBtn = document.getElementById("pickNativeContactBtn");
+  const phonebookGateCard = document.getElementById("phonebookGateCard");
+  const btnGateSyncPhonebook = document.getElementById("btnGateSyncPhonebook");
+
+  if (btnGateSyncPhonebook && pickNativeContactBtn) {
+    btnGateSyncPhonebook.onclick = () => pickNativeContactBtn.click();
+  }
 
   // DOM Elements - Sync Banner
   const syncBanner = document.getElementById("syncBanner");
