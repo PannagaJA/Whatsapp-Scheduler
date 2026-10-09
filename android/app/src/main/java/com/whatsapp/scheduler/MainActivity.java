@@ -293,7 +293,9 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
                             startActivity(browserIntent);
-                        } catch (_) {}
+                        } catch (Exception ignored) {
+                            // Fallback browser not available
+                        }
                     });
                 }
             });
