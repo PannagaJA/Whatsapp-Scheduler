@@ -69,6 +69,14 @@ async function initWhatsAppEngine() {
       currentQr = null;
       userProfile = sock.user;
       console.log(`[WhatsApp Engine] Connected successfully as: ${userProfile?.name || userProfile?.id}`);
+      
+      // Auto-fetch all groups and sync them into contacts table
+      try {
+        const groups = await sock.groupFetchAllParticipating();
+        for (const [gid, groupData] of Object.entries(groups)) {
+          await upsertContactRecord(gid, groupData.subject || '', null, 1);
+        }
+      } catch (_) {}
     }
   });
 
@@ -143,6 +151,16 @@ async function initWhatsAppEngine() {
       if (g.id && g.subject) {
         await upsertContactRecord(g.id, g.subject, null, 1);
       }
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    for (const m of messages || []) {
+      if (!m.key?.remoteJid) continue;
+      const jid = m.key.remoteJid;
+      const isGrp = jid.endsWith('@g.us') ? 1 : 0;
+      const name = m.pushName || '';
+      await upsertContactRecord(jid, name, null, isGrp);
     }
   });
 

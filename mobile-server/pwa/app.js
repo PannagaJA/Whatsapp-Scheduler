@@ -200,27 +200,45 @@
     } catch (_) {}
   }
   loadContacts();
+  // Poll contacts every 10 seconds while on schedule tab
+  setInterval(loadContacts, 10000);
 
-  recipientInput.oninput = () => {
-    const q = recipientInput.value.trim().toLowerCase();
-    if (!q || allContacts.length === 0) {
-      contactsDropdown.style.display = 'none';
-      return;
+  function renderContactSuggestions(filter = '') {
+    const q = filter.trim().toLowerCase();
+    let matches = [];
+
+    if (!q) {
+      matches = allContacts.slice(0, 8);
+    } else {
+      matches = allContacts.filter(c => 
+        (c.name && c.name.toLowerCase().includes(q)) || 
+        (c.phone && c.phone.includes(q))
+      ).slice(0, 8);
     }
-
-    const matches = allContacts.filter(c => 
-      (c.name && c.name.toLowerCase().includes(q)) || 
-      (c.phone && c.phone.includes(q))
-    ).slice(0, 6);
 
     if (matches.length === 0) {
+      if (allContacts.length === 0) {
+        contactsDropdown.innerHTML = `
+          <div style="padding: 12px 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+            ⏳ WhatsApp contacts are syncing in background.<br>
+            <strong>Tip:</strong> You can type any phone number directly (e.g. <code>+919876543210</code>).
+          </div>
+        `;
+        contactsDropdown.style.display = 'block';
+        return;
+      }
       contactsDropdown.style.display = 'none';
       return;
     }
 
-    contactsDropdown.innerHTML = matches.map(c => `
+    contactsDropdown.innerHTML = `
+      <div style="padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
+        <span>${q ? 'MATCHING CONTACTS' : 'RECENT CONTACTS & GROUPS'}</span>
+        <span>${allContacts.length} Synced</span>
+      </div>
+    ` + matches.map(c => `
       <div class="suggestion-item" data-recipient="${c.name || c.phone}">
-        <span class="suggestion-name">${c.name || c.phone}</span>
+        <span class="suggestion-name">${c.is_group ? '👥 ' : '👤 '}${c.name || c.phone}</span>
         <span class="suggestion-phone">${c.is_group ? 'WhatsApp Group' : (c.phone ? '+' + c.phone : '')}</span>
       </div>
     `).join('');
@@ -233,6 +251,14 @@
     });
 
     contactsDropdown.style.display = 'block';
+  }
+
+  recipientInput.onfocus = () => {
+    loadContacts().then(() => renderContactSuggestions(recipientInput.value));
+  };
+
+  recipientInput.oninput = () => {
+    renderContactSuggestions(recipientInput.value);
   };
 
   document.addEventListener('click', (e) => {
