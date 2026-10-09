@@ -1,7 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-const { run, get, all } = require('./db');
-const { sendWhatsAppMessage, getStatus } = require('./engine');
+const fs = require("fs");
+const path = require("path");
+const { run, get, all } = require("./db");
+const { sendWhatsAppMessage, getStatus } = require("./engine");
 
 let isProcessing = false;
 
@@ -24,9 +24,9 @@ async function checkAndProcessSchedules() {
       return;
     }
 
-    const { status } = getStatus();
-    if (status !== 'connected') {
-      console.log(`[Scheduler] ${pendingJobs.length} jobs pending, but WhatsApp engine is not connected (${status}). Waiting...`);
+    const statusObj = await getStatus();
+    if (statusObj.status !== "connected") {
+      console.log(`[Scheduler] ${pendingJobs.length} jobs pending, but WhatsApp engine is not connected (${statusObj.status}). Waiting...`);
       isProcessing = false;
       return;
     }
@@ -41,14 +41,14 @@ async function checkAndProcessSchedules() {
       } catch (_) {}
 
       try {
-        await sendWhatsAppMessage(job.recipient, job.text, attachments);
+        const result = await sendWhatsAppMessage(job.recipient, job.text, attachments);
 
         await run(`
           UPDATE schedules 
-          SET status = 'sent', sent_at = ?, error = NULL 
+          SET status = 'sent', sent_at = ?, jid = coalesce(?, jid), error = NULL 
           WHERE id = ?
-        `, [Date.now(), job.id]);
-        console.log(`[Scheduler] Job ${job.id} sent successfully!`);
+        `, [Date.now(), result?.jid || null, job.id]);
+        console.log(`[Scheduler] Job ${job.id} sent successfully to ${result?.jid || job.recipient}!`);
 
         // Clean up temporary attachment files
         for (const file of attachments) {
@@ -77,14 +77,14 @@ async function checkAndProcessSchedules() {
       }
     }
   } catch (err) {
-    console.error('[Scheduler] Error in scheduler loop:', err);
+    console.error("[Scheduler] Error in scheduler loop:", err);
   } finally {
     isProcessing = false;
   }
 }
 
 function startScheduler(intervalMs = 5000) {
-  console.log('[Scheduler] Background scheduler loop started (interval: 5s).');
+  console.log("[Scheduler] Background scheduler loop started (interval: 5s).");
   setInterval(checkAndProcessSchedules, intervalMs);
 }
 

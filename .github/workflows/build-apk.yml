@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,7 +36,9 @@ jobs:
 
       - name: Build Debug APK
         working-directory: ./android
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          gradle assembleDebug -PversionCode=$BUILD_NUM -PversionName="1.0.$BUILD_NUM" --no-daemon --stacktrace
 
       - name: Prepare APK Artifact
         run: |
@@ -50,12 +54,14 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub Release (with direct APK download)
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0} (Auto-Build)', github.run_number) }}
           files: build-output/WhatsApp-Scheduler.apk
           draft: false
           prerelease: false
+          make_latest: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

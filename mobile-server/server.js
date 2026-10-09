@@ -1,87 +1,85 @@
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const { run, get, all, DB_DIR } = require('./db');
-const { initWhatsAppEngine, getStatus, requestPairingCode, getProfilePicture, logoutSession } = require('./engine');
-const { startScheduler } = require('./scheduler');
+const express = require("express");
+const multer = require("multer");
+const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const { db, run, get, all, DB_DIR } = require("./db");
+const {
+  initWhatsAppEngine,
+  getStatus,
+  requestPairingCode,
+  getProfilePicture,
+  formatRecipientJid,
+  sendWhatsAppMessage,
+  logoutSession
+} = require("./engine");
+const { startScheduler } = require("./scheduler");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Setup upload storage for shared & scheduled attachments
-const UPLOAD_DIR = path.join(DB_DIR, 'uploads');
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Setup Storage for Attachments
+const UPLOADS_DIR = path.join(DB_DIR, "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + crypto.randomUUID().slice(0, 8);
     const ext = path.extname(file.originalname);
-    cb(null, `${uniqueSuffix}${ext}`);
+    cb(null, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`);
   }
 });
 const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
 
+// In-Memory Staged Files Cache (For Share Target API)
+const shareCache = new Map();
+
+// Middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.static(path.join(__dirname, "pwa")));
 
-// Serve Static PWA
-app.use(express.static(path.join(__dirname, 'pwa')));
-
-// Web Share Target Endpoint (Standard W3C PWA Share Sheet Handler)
-// When user shares text/file from official WhatsApp or Gallery, the OS opens this POST route
-app.post('/share', upload.array('files', 10), (req, res) => {
-  const title = req.body.title || '';
-  const text = req.body.text || '';
-  const url = req.body.url || '';
-  const files = (req.files || []).map(f => ({
-    name: f.originalname,
-    filename: f.filename,
-    size: f.size,
-    type: f.mimetype,
-    path: f.path
-  }));
-
-  const sharePayload = {
-    title,
-    text: [text, url].filter(Boolean).join('\n'),
-    files
+// Web Share Target API Endpoint (Android Native Intent Receiver)
+app.post("/share-target", upload.array("media", 10), (req, res) => {
+  const shareId = crypto.randomUUID();
+  const shareData = {
+    title: req.body.title || "",
+    text: req.body.text || "",
+    url: req.body.url || "",
+    files: (req.files || []).map(f => ({
+      name: f.originalname,
+      filename: f.filename,
+      size: f.size,
+      type: f.mimetype,
+      path: f.path
+    }))
   };
 
-  // Temporarily store in session/memory or pass via query token for PWA to read
-  const shareId = crypto.randomUUID();
-  shareCache.set(shareId, sharePayload);
+  shareCache.set(shareId, shareData);
+  // Auto-clean cache after 15 minutes
+  setTimeout(() => shareCache.delete(shareId), 15 * 60 * 1000);
 
-  // Redirect mobile browser to PWA homepage with shareId
-  res.redirect(`/?shareId=${shareId}`);
+  res.redirect(`/?shared=1&shareId=${shareId}`);
 });
 
-const shareCache = new Map();
-// Clear shareCache entries older than 10 minutes
-setInterval(() => {
-  if (shareCache.size > 100) shareCache.clear();
-}, 10 * 60 * 1000);
-
-// API: Get Shared Data for PWA
-app.get('/api/shared/:shareId', (req, res) => {
+// API: Retrieve Shared Data
+app.get("/api/shared/:shareId", (req, res) => {
   const shareId = req.params.shareId;
   const data = shareCache.get(shareId);
   if (data) {
     shareCache.delete(shareId);
     res.json({ success: true, ...data });
   } else {
-    res.status(404).json({ success: false, error: 'Share data expired or not found' });
+    res.status(404).json({ success: false, error: "Share data expired or not found" });
   }
 });
 
 // API: Status & Diagnostics (returns real-time syncing progress & contact count)
-app.get('/api/status', async (req, res) => {
+app.get("/api/status", async (req, res) => {
   try {
     const status = await getStatus();
     res.json({ success: true, ...status });
@@ -91,14 +89,14 @@ app.get('/api/status', async (req, res) => {
 });
 
 // API: Dedicated QR Code Endpoint
-app.get('/api/qr', async (req, res) => {
+app.get("/api/qr", async (req, res) => {
   try {
     const status = await getStatus();
     res.json({ 
       success: true, 
       qr: status.qr || null, 
       status: status.status, 
-      connected: status.status === 'connected' 
+      connected: status.status === "connected" 
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -106,11 +104,11 @@ app.get('/api/qr', async (req, res) => {
 });
 
 // API: Request 8-digit Pairing Code (accepts phoneNumber or phone)
-app.post('/api/pair-code', async (req, res) => {
+app.post("/api/pair-code", async (req, res) => {
   try {
     const phoneNumber = req.body.phoneNumber || req.body.phone;
     if (!phoneNumber) {
-      return res.status(400).json({ success: false, error: 'Phone number is required (e.g. 919876543210)' });
+      return res.status(400).json({ success: false, error: "Phone number is required (e.g. 919876543210)" });
     }
     const code = await requestPairingCode(phoneNumber);
     res.json({ success: true, code });
@@ -120,7 +118,7 @@ app.post('/api/pair-code', async (req, res) => {
 });
 
 // API: Logout
-app.post('/api/logout', async (req, res) => {
+app.post("/api/logout", async (req, res) => {
   try {
     await logoutSession();
     res.json({ success: true });
@@ -130,7 +128,7 @@ app.post('/api/logout', async (req, res) => {
 });
 
 // API: List Contacts
-app.get('/api/contacts', async (req, res) => {
+app.get("/api/contacts", async (req, res) => {
   try {
     const contacts = await all(`
       SELECT jid, 
@@ -149,26 +147,26 @@ app.get('/api/contacts', async (req, res) => {
 });
 
 // API: Bulk Import Contacts (from Phonebook sync)
-app.post('/api/contacts/import', async (req, res) => {
+app.post("/api/contacts/import", async (req, res) => {
   try {
     const { contacts } = req.body;
     if (!Array.isArray(contacts) || contacts.length === 0) {
-      return res.status(400).json({ success: false, error: 'No contacts provided' });
+      return res.status(400).json({ success: false, error: "No contacts provided" });
     }
 
-    const { batchUpsertContacts } = require('./db');
+    const { batchUpsertContacts } = require("./db");
     const batch = [];
 
     for (const c of contacts) {
-      const name = (c.name || '').trim();
-      let rawPhone = String(c.phone || c.tel || '').replace(/\D/g, '');
+      const name = (c.name || "").trim();
+      let rawPhone = String(c.phone || c.tel || "").replace(/\D/g, "");
       if (!rawPhone || rawPhone.length < 7) continue;
 
       let normalizedPhone = rawPhone;
       if (rawPhone.length === 10) {
-        normalizedPhone = '91' + rawPhone;
-      } else if (rawPhone.length === 11 && rawPhone.startsWith('0')) {
-        normalizedPhone = '91' + rawPhone.slice(1);
+        normalizedPhone = "91" + rawPhone;
+      } else if (rawPhone.length === 11 && rawPhone.startsWith("0")) {
+        normalizedPhone = "91" + rawPhone.slice(1);
       }
 
       const jid = `${normalizedPhone}@s.whatsapp.net`;
@@ -188,7 +186,7 @@ app.post('/api/contacts/import', async (req, res) => {
 });
 
 // API: Contact / Group Profile Picture
-app.get('/api/profile-pic', async (req, res) => {
+app.get("/api/profile-pic", async (req, res) => {
   try {
     const { jid } = req.query;
     if (!jid) return res.status(400).json({ success: false, url: null });
@@ -200,16 +198,19 @@ app.get('/api/profile-pic', async (req, res) => {
 });
 
 // API: List Scheduled Messages
-app.get('/api/schedules', async (req, res) => {
+app.get("/api/schedules", async (req, res) => {
   try {
     const schedules = await all(`
-      SELECT s.*, 
-             COALESCE(c.name, '') as contact_name
+      SELECT s.*,
+             (
+               SELECT coalesce(nullif(c.name, ''), '')
+               FROM contacts c
+               WHERE (c.jid IS NOT NULL AND c.jid != '' AND (c.jid = s.jid OR c.jid = s.recipient))
+                  OR (c.phone IS NOT NULL AND c.phone != '' AND (c.phone = s.recipient OR s.recipient LIKE '%' || c.phone || '%'))
+               ORDER BY (CASE WHEN nullif(c.name, '') IS NOT NULL AND c.name != 'WhatsApp' THEN 0 ELSE 1 END), c.updated_at DESC
+               LIMIT 1
+             ) as contact_name
       FROM schedules s
-      LEFT JOIN contacts c ON (
-        (c.phone IS NOT NULL AND c.phone != '' AND s.recipient LIKE '%' || c.phone || '%') OR
-        (c.jid IS NOT NULL AND c.jid != '' AND s.recipient = c.jid)
-      )
       ORDER BY s.scheduled_at ASC
     `);
     const formatted = schedules.map(s => {
@@ -224,16 +225,16 @@ app.get('/api/schedules', async (req, res) => {
 });
 
 // API: Create Schedule (Supports direct JSON or Multipart file uploads)
-app.post('/api/schedules', upload.array('attachments', 10), async (req, res) => {
+app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => {
   try {
     const id = crypto.randomUUID();
-    const recipient = req.body.recipient?.trim();
-    const text = req.body.text?.trim() || '';
+    const rawRecipient = (req.body.recipient || "").trim();
+    const text = (req.body.text || "").trim();
     const scheduledAt = parseInt(req.body.scheduledAt, 10);
 
-    if (!recipient) return res.status(400).json({ success: false, error: 'Recipient is required' });
+    if (!rawRecipient) return res.status(400).json({ success: false, error: "Recipient is required" });
     if (!scheduledAt || scheduledAt <= Date.now()) {
-      return res.status(400).json({ success: false, error: 'Scheduled time must be in the future' });
+      return res.status(400).json({ success: false, error: "Scheduled time must be in the future" });
     }
 
     // Process attached files
@@ -261,17 +262,22 @@ app.post('/api/schedules', upload.array('attachments', 10), async (req, res) => 
     }
 
     if (!text && attachments.length === 0) {
-      return res.status(400).json({ success: false, error: 'Please enter a message or attach a file' });
+      return res.status(400).json({ success: false, error: "Please enter a message or attach a file" });
     }
 
+    let resolvedJid = null;
+    try {
+      resolvedJid = await formatRecipientJid(rawRecipient);
+    } catch (_) {}
+
     await run(`
-      INSERT INTO schedules (id, recipient, text, attachments, scheduled_at, status, created_at)
-      VALUES (?, ?, ?, ?, ?, 'scheduled', ?)
-    `, [id, recipient, text, JSON.stringify(attachments), scheduledAt, Date.now()]);
+      INSERT INTO schedules (id, recipient, jid, text, attachments, scheduled_at, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
+    `, [id, rawRecipient, resolvedJid, text, JSON.stringify(attachments), scheduledAt, Date.now()]);
 
     res.json({
       success: true,
-      schedule: { id, recipient, text, attachments, scheduledAt, status: 'scheduled' }
+      schedule: { id, recipient: rawRecipient, jid: resolvedJid, text, attachments, scheduledAt, status: "scheduled" }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -279,10 +285,10 @@ app.post('/api/schedules', upload.array('attachments', 10), async (req, res) => 
 });
 
 // API: Delete / Cancel Schedule
-app.delete('/api/schedules/:id', async (req, res) => {
+app.delete("/api/schedules/:id", async (req, res) => {
   try {
-    const schedule = await get(`SELECT * FROM schedules WHERE id = ?`, [req.params.id]);
-    if (!schedule) return res.status(404).json({ success: false, error: 'Schedule not found' });
+    const schedule = await get("SELECT * FROM schedules WHERE id = ?", [req.params.id]);
+    if (!schedule) return res.status(404).json({ success: false, error: "Schedule not found" });
 
     // Remove files
     if (schedule.attachments) {
@@ -294,7 +300,7 @@ app.delete('/api/schedules/:id', async (req, res) => {
       } catch (_) {}
     }
 
-    await run(`DELETE FROM schedules WHERE id = ?`, [req.params.id]);
+    await run("DELETE FROM schedules WHERE id = ?", [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -302,8 +308,8 @@ app.delete('/api/schedules/:id', async (req, res) => {
 });
 
 // Fallback to PWA index
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'pwa', 'index.html'));
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "pwa", "index.html"));
 });
 
 // Start Server & Engines
@@ -317,6 +323,6 @@ app.listen(PORT, async () => {
     await initWhatsAppEngine();
     startScheduler(5000);
   } catch (err) {
-    console.error('Failed to initialize WhatsApp engine on boot:', err);
+    console.error("Failed to initialize WhatsApp engine on boot:", err);
   }
 });

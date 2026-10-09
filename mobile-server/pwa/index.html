@@ -28,10 +28,21 @@
           <img src="/icons/logo-64.png" width="32" height="32" alt="App Logo" style="border-radius: 8px; display: block; object-fit: cover; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">        </div>
         <div class="header-titles">
           <h1>WhatsApp Scheduler</h1>
-          <div class="status-indicator" id="headerStatus">
+          <div class="status-indicator connected" id="headerStatus">
             <span class="status-dot"></span>
-            <span class="status-text">Connecting…</span>
+            <span class="status-text">Connected</span>
           </div>
+          <script>
+            try {
+              var s = localStorage.getItem("wa_status") || "connected";
+              var el = document.getElementById("headerStatus");
+              if (el) {
+                el.className = "status-indicator " + s;
+                var txt = el.querySelector(".status-text");
+                if (txt) txt.textContent = s === "connected" ? "Connected" : (s === "connecting" ? "Connecting…" : (s === "qr" ? "Scan QR Code" : "Disconnected"));
+              }
+            } catch (_) {}
+          </script>
         </div>
       </div>
       <div class="header-actions">
