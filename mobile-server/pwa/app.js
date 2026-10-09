@@ -70,6 +70,63 @@ document.addEventListener("DOMContentLoaded", () => {
   let statusPollInterval = null;
 
   // Helper: Escape HTML
+  
+  // Universal Clipboard Copy Helper
+  async function copyTextToClipboard(text, btnElement) {
+    let copied = false;
+
+    if (window.AndroidNative && typeof window.AndroidNative.copyToClipboard === "function") {
+      try {
+        window.AndroidNative.copyToClipboard(text);
+        copied = true;
+      } catch (_) {}
+    }
+
+    if (!copied && navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (_) {
+        copied = fallbackCopy(text);
+      }
+    }
+
+    if (!copied) {
+      copied = fallbackCopy(text);
+    }
+
+    if (copied) {
+      showToast("✓ Pairing Code Copied!");
+
+      if (btnElement) {
+        btnElement.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Copied</span>`;
+        setTimeout(() => {
+          btnElement.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg><span>Copy</span>`;
+        }, 2500);
+      }
+    } else {
+      showToast("Unable to copy code automatically.");
+    }
+  }
+
+  function fallbackCopy(text) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const success = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return Boolean(success);
+    } catch (_) {
+      return false;
+    }
+  }
+
   function escapeHtml(text) {
     if (!text) return "";
     return String(text)
@@ -92,9 +149,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return digits ? `+${digits}` : "";
   }
 
-  // Helper: Check Phonebook Sync State STRICTLY based on user device sync
+  let isPhonebookImportedState = false;
+
+  // Helper: Check Phonebook Sync State STRICTLY based on verified import
   function isPhonebookImported() {
-    return localStorage.getItem("wa_phonebook_synced") === "true";
+    return Boolean(isPhonebookImportedState);
   }
 
   // 1. Toast Notification
@@ -163,28 +222,64 @@ document.addEventListener("DOMContentLoaded", () => {
   const savedTab = localStorage.getItem("wa_active_tab") || "paneSchedule";
   switchTab(savedTab);
 
-  // 4. Default Date & Time
+  // 4. Default Date & Time (Local Timezone Aware)
+  function formatLocalDate(d = new Date()) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return year + "-" + month + "-" + day;
+  }
+
+  function formatLocalTime(d = new Date()) {
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    return hours + ":" + minutes;
+  }
+
   function initDateTime() {
     const now = new Date();
-    if (dateInput) dateInput.value = now.toISOString().split("T")[0];
-    
     const future = new Date(now.getTime() + 15 * 60000);
-    const hours = String(future.getHours()).padStart(2, "0");
-    const minutes = String(future.getMinutes()).padStart(2, "0");
-    if (timeInput) timeInput.value = `${hours}:${minutes}`;
 
-    document.querySelectorAll(".preset-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        const mins = parseInt(btn.getAttribute("data-mins"), 10);
-        const targetDate = new Date(Date.now() + mins * 60000);
-        if (dateInput) dateInput.value = targetDate.toISOString().split("T")[0];
-        if (timeInput) timeInput.value = `${String(targetDate.getHours()).padStart(2, "0")}:${String(targetDate.getMinutes()).padStart(2, "0")}`;
-      });
-    });
+    if (dateInput) dateInput.value = formatLocalDate(future);
+    if (timeInput) timeInput.value = formatLocalTime(future);
   }
   initDateTime();
+
+  // Preset Chips Event Handlers (+15 min, +1 hr, +3 hrs, Tomorrow 9 AM, Tomorrow 6 PM)
+  document.querySelectorAll(".preset-chips .chip").forEach(chip => {
+    chip.addEventListener("click", (e) => {
+      e.preventDefault();
+      document.querySelectorAll(".preset-chips .chip").forEach(b => b.classList.remove("active"));
+      chip.classList.add("active");
+
+      const preset = chip.getAttribute("data-preset");
+      const now = new Date();
+
+      if (preset === "15m") {
+        const target = new Date(now.getTime() + 15 * 60000);
+        if (dateInput) dateInput.value = formatLocalDate(target);
+        if (timeInput) timeInput.value = formatLocalTime(target);
+      } else if (preset === "1h") {
+        const target = new Date(now.getTime() + 60 * 60000);
+        if (dateInput) dateInput.value = formatLocalDate(target);
+        if (timeInput) timeInput.value = formatLocalTime(target);
+      } else if (preset === "3h") {
+        const target = new Date(now.getTime() + 180 * 60000);
+        if (dateInput) dateInput.value = formatLocalDate(target);
+        if (timeInput) timeInput.value = formatLocalTime(target);
+      } else if (preset === "tomorrow9") {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        if (dateInput) dateInput.value = formatLocalDate(tomorrow);
+        if (timeInput) timeInput.value = "09:00";
+      } else if (preset === "tomorrow18") {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        if (dateInput) dateInput.value = formatLocalDate(tomorrow);
+        if (timeInput) timeInput.value = "18:00";
+      }
+    });
+  });
 
   // 5. Attachments Handling
   if (addFileBtn && filePicker) {
@@ -208,8 +303,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const item = document.createElement("div");
       item.className = "file-preview-item";
       item.innerHTML = `
-        <span>📎 ${escapeHtml(f.name || "Attachment")} (${f.size ? (f.size / 1024).toFixed(0) + "KB" : "File"})</span>
-        <button type="button" class="btn-remove-file" data-type="staged" data-idx="${idx}">×</button>
+        <span style="display: inline-flex; align-items: center; gap: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>${escapeHtml(f.name || "Attachment")} (${f.size ? (f.size / 1024).toFixed(0) + "KB" : "File"})</span>
+        <button type="button" class="btn-remove-file" data-type="staged" data-idx="${idx}" aria-label="Remove"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       `;
       filesList.appendChild(item);
     });
@@ -284,12 +379,11 @@ document.addEventListener("DOMContentLoaded", () => {
           body: JSON.stringify({ contacts: list })
         });
         const data = await res.json();
-        localStorage.setItem("wa_phonebook_synced", "true");
+        await checkStatus();
         await loadContacts();
         const count = data.count || list.length;
         updateSyncProgress(100, `✓ Synced all ${count} contacts!`, true);
         showToast(`✓ Imported ${count} contacts with exact phonebook names!`, 4000);
-        checkStatus();
         if (recipientInput) renderContactSuggestions(recipientInput.value);
       } else {
         showToast("No phonebook contacts found on device.");
@@ -336,11 +430,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ contacts: formatted })
               });
               const data = await res.json();
-              localStorage.setItem("wa_phonebook_synced", "true");
+              await checkStatus();
               await loadContacts();
-              updateSyncProgress(100, `✓ Synced ${data.count || formatted.length} contacts!`, true);
-              showToast(`✓ Imported ${data.count || formatted.length} contacts with names!`);
-              checkStatus();
+              const count = data.count || formatted.length;
+              updateSyncProgress(100, `✓ Synced ${count} contacts!`, true);
+              showToast(`✓ Imported ${count} contacts with names!`);
               if (recipientInput) renderContactSuggestions(recipientInput.value);
             }
           }
@@ -355,10 +449,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 8. Contact Autocomplete Engine
   async function loadContacts() {
+    if (!isPhonebookImported()) {
+      allContacts = [];
+      return;
+    }
     try {
       const res = await fetch("/api/contacts");
       const data = await res.json();
-      if (data?.contacts) allContacts = data.contacts;
+      if (data?.contacts && Array.isArray(data.contacts)) {
+        allContacts = data.contacts;
+      }
     } catch (_) {}
   }
   loadContacts();
@@ -456,7 +556,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const avatar = document.createElement("div");
       avatar.className = "suggestion-avatar";
-      avatar.textContent = c.is_group ? "👥" : "👤";
+      avatar.innerHTML = c.is_group 
+        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
+        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
       if (c.jid) loadAvatar(c.jid, avatar);
 
       const info = document.createElement("div");
@@ -576,8 +678,16 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const targetTime = new Date(`${dateVal}T${timeVal}`).getTime();
-      if (isNaN(targetTime) || targetTime <= Date.now()) {
+      const [yr, mo, dy] = dateVal.split("-").map(Number);
+      const [hr, mn] = timeVal.split(":").map(Number);
+      const targetDate = new Date(yr, mo - 1, dy, hr || 0, mn || 0, 0, 0);
+      const targetTime = targetDate.getTime();
+
+      if (isNaN(targetTime)) {
+        showToast("Please enter a valid scheduled date & time.");
+        return;
+      }
+      if (targetTime <= Date.now()) {
         showToast("Scheduled time must be in the future!");
         return;
       }
@@ -653,7 +763,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (uniqueSchedules.length === 0) {
       queueList.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">📅</div>
+          <div class="empty-icon" style="display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="m9 16 2 2 4-4"/></svg>
+          </div>
           <div class="empty-text">No Scheduled Messages</div>
           <p style="color: var(--text-muted); font-size: 13px; margin-top: 4px;">Schedule your first message using the Schedule tab.</p>
         </div>
@@ -670,13 +782,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const dateStr = dt.toLocaleDateString([], { month: "short", day: "numeric" });
 
       let badgeClass = "badge-scheduled";
-      let statusLabel = "Scheduled";
+      let statusLabel = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: -1px; margin-right: 3px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Scheduled`;
       if (s.status === "sent") {
         badgeClass = "badge-sent";
-        statusLabel = "Sent ✓";
+        statusLabel = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: -1px; margin-right: 3px;"><polyline points="20 6 9 17 4 12"/></svg>Sent`;
       } else if (s.status === "failed") {
         badgeClass = "badge-failed";
-        statusLabel = "Failed ✕";
+        statusLabel = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: -1px; margin-right: 3px;"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>Failed`;
       } else if (s.status === "processing") {
         badgeClass = "badge-processing";
         statusLabel = "Sending…";
@@ -701,16 +813,22 @@ document.addEventListener("DOMContentLoaded", () => {
       card.innerHTML = `
         <div class="queue-card-header">
           <div class="queue-recipient-box">
-            <div class="queue-recipient">👤 ${escapeHtml(displayName)}</div>
-            ${phoneStr && s.contact_name ? `<div class="queue-phone-sub">📞 ${formatPhone(phoneStr)}</div>` : ""}
+            <div class="queue-recipient" style="display: inline-flex; align-items: center; gap: 6px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span>${escapeHtml(displayName)}</span>
+            </div>
+            ${phoneStr && s.contact_name ? `<div class="queue-phone-sub" style="display: inline-flex; align-items: center; gap: 4px; margin-top: 2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg><span>${formatPhone(phoneStr)}</span></div>` : ""}
           </div>
           <div class="queue-status-badge ${badgeClass}">${statusLabel}</div>
         </div>
-        <div class="queue-message-preview">${escapeHtml(s.text || (attachmentsCount > 0 ? "📎 " + attachmentsCount + " Attachment(s)" : "No Text"))}</div>
-        ${attachmentsCount > 0 && s.text ? `<div style="font-size: 11px; color: var(--accent); margin-top: 4px;">📎 ${attachmentsCount} file(s) attached</div>` : ""}
+        <div class="queue-message-preview">${escapeHtml(s.text || (attachmentsCount > 0 ? attachmentsCount + " Attachment(s)" : "No Text"))}</div>
+        ${attachmentsCount > 0 && s.text ? `<div style="font-size: 11.5px; color: var(--accent); margin-top: 4px; display: inline-flex; align-items: center; gap: 4px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>${attachmentsCount} file(s) attached</span></div>` : ""}
         <div class="queue-footer">
-          <div class="queue-time">🕒 ${dateStr}, ${timeStr}</div>
-          ${s.status === "scheduled" || s.status === "retrying" || s.status === "failed" ? `<button class="btn-cancel-schedule" data-id="${s.id}">Cancel</button>` : ""}
+          <div class="queue-time" style="display: inline-flex; align-items: center; gap: 5px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>${dateStr}, ${timeStr}</span>
+          </div>
+          ${s.status === "scheduled" || s.status === "retrying" || s.status === "failed" ? `<button class="btn-cancel-schedule" data-id="${s.id}" style="display: inline-flex; align-items: center; gap: 4px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>Cancel</span></button>` : ""}
         </div>
       `;
 
@@ -807,16 +925,34 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       
       const isConn = data.status === "connected";
-      try { localStorage.setItem("wa_status", data.status); } catch (_) {}
       const isConnecting = data.status === "connecting";
       const isSyncing = Boolean(data.syncing);
       const contactCount = data.contactCount || 0;
+      const phonebookCount = data.phonebookContactCount || 0;
+      const phonebookImported = Boolean(data.phonebookImported);
+
+      isPhonebookImportedState = isConn && phonebookImported;
+
+      try { 
+        localStorage.setItem("wa_status", data.status); 
+        if (isPhonebookImportedState) {
+          localStorage.setItem("wa_phonebook_synced", "true");
+        } else {
+          localStorage.removeItem("wa_phonebook_synced");
+        }
+      } catch (_) {}
 
       if (headerStatus) {
         headerStatus.className = `status-indicator ${data.status}`;
       }
 
-      updateInputAvailability(data.status, isSyncing, contactCount);
+      updateInputAvailability(data.status, isSyncing, contactCount, isPhonebookImportedState);
+
+      if (isPhonebookImportedState && allContacts.length === 0) {
+        loadContacts();
+      } else if (!isPhonebookImportedState && allContacts.length > 0) {
+        allContacts = [];
+      }
 
       if (devicePill) {
         if (isConn) {
@@ -834,10 +970,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      const effectiveCount = Math.max(contactCount, allContacts.length);
       if (deviceUserInfo) {
         if ((isConn || isConnecting) && data.user) {
-          deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || "")} (${data.user.id ? data.user.id.split(":")[0] : ""})<br><small style="color: #25D366; font-weight: 600;">✓ ${effectiveCount} Contacts Synced & Available</small>`;
+          const syncLabel = isPhonebookImportedState
+            ? `<small style="color: #25D366; font-weight: 600;">✓ ${phonebookCount || allContacts.length} Phonebook Contacts Synced</small>`
+            : `<small style="color: #ffc107; font-weight: 600;">⚠️ Phonebook Not Synced (Required for Scheduling)</small>`;
+
+          deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || "")} (${data.user.id ? data.user.id.split(":")[0] : ""})<br>${syncLabel}`;
           deviceUserInfo.style.display = "block";
         } else {
           deviceUserInfo.style.display = "none";
@@ -1010,6 +1149,11 @@ document.addEventListener("DOMContentLoaded", () => {
           if (pairCodeResult) pairCodeResult.textContent = formattedCode;
           if (pairCodeDisplay) pairCodeDisplay.style.display = "block";
           showToast("✓ 8-Digit Pairing Code Generated!");
+
+          const btnCopyPairCode = document.getElementById("btnCopyPairCode");
+          if (btnCopyPairCode) {
+            btnCopyPairCode.onclick = () => copyTextToClipboard(formattedCode, btnCopyPairCode);
+          }
         } else {
           showToast(data.error || "Failed to generate pairing code");
         }

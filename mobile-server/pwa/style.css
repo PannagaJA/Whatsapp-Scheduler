@@ -1122,7 +1122,6 @@ textarea:disabled {
   font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
-  padding-left: 20px;
 }
 
 .queue-status-badge {
@@ -1133,6 +1132,9 @@ textarea:disabled {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .badge-scheduled {

@@ -39,6 +39,11 @@ const shareCache = new Map();
 
 // Middleware
 app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  next();
+});
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "pwa")));
@@ -174,9 +179,16 @@ app.post("/api/logout", async (req, res) => {
   }
 });
 
-// API: List Contacts
+// API: List Contacts (Only returns contacts if phonebook is imported or groups)
 app.get("/api/contacts", async (req, res) => {
   try {
+    const setting = await get("SELECT value FROM settings WHERE key = 'phonebook_imported'");
+    const phonebookImported = setting ? setting.value === "1" : false;
+
+    if (!phonebookImported) {
+      return res.json({ success: true, contacts: [], count: 0, phonebookImported: false });
+    }
+
     const contacts = await all(`
       SELECT jid, 
              coalesce(nullif(name, ''), '') as name, 
@@ -184,10 +196,11 @@ app.get("/api/contacts", async (req, res) => {
              is_group 
       FROM contacts 
       WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
+        AND (source = 'phonebook' OR is_group = 1 OR (nullif(name, '') IS NOT NULL AND name != 'WhatsApp' AND name != 'Contact'))
       ORDER BY is_group ASC, (CASE WHEN nullif(name, '') IS NOT NULL THEN 0 ELSE 1 END), updated_at DESC
       LIMIT 5000
     `);
-    res.json({ success: true, contacts, count: contacts.length });
+    res.json({ success: true, contacts, count: contacts.length, phonebookImported: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -225,7 +238,8 @@ app.post("/api/contacts/import", async (req, res) => {
       });
     }
 
-    const inserted = await batchUpsertContacts(batch);
+    const inserted = await batchUpsertContacts(batch, "phonebook");
+    await run("INSERT INTO settings (key, value) VALUES ('phonebook_imported', '1') ON CONFLICT(key) DO UPDATE SET value = '1'");
     res.json({ success: true, count: inserted });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

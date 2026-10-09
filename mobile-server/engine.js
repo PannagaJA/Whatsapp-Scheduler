@@ -66,19 +66,24 @@ async function initWhatsAppEngine() {
 
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
+      const shouldReconnect = !isLoggedOut;
       connectionStatus = shouldReconnect ? "connecting" : "disconnected";
       currentQr = null;
       userProfile = null;
       isSyncing = false;
-      console.log(`[WhatsApp Engine] Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+      console.log(`[WhatsApp Engine] Connection closed. Code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
 
-      if (shouldReconnect) {
-        setTimeout(initWhatsAppEngine, 3000);
-      } else {
-        console.log("[WhatsApp Engine] Session logged out. Clearing auth data...");
+      if (isLoggedOut) {
+        console.log("[WhatsApp Engine] WhatsApp unlinked from phone. Clearing authentication session and resetting phonebook state...");
         try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (_) {}
+        try {
+          await run("INSERT INTO settings (key, value) VALUES ('phonebook_imported', '0') ON CONFLICT(key) DO UPDATE SET value = '0'");
+          await run("DELETE FROM contacts");
+        } catch (_) {}
         setTimeout(initWhatsAppEngine, 1000);
+      } else if (shouldReconnect) {
+        setTimeout(initWhatsAppEngine, 3000);
       }
     } else if (connection === "open") {
       connectionStatus = "connected";
@@ -234,15 +239,26 @@ async function initWhatsAppEngine() {
 
 async function getStatus() {
   let count = 0;
+  let phonebookCount = 0;
+  let phonebookImported = false;
+
   try {
     const row = await get("SELECT COUNT(*) as count FROM contacts WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')");
     count = row ? row.count : 0;
+
+    const pbRow = await get("SELECT COUNT(*) as count FROM contacts WHERE name_source = 'phonebook' AND nullif(name, '') IS NOT NULL");
+    phonebookCount = pbRow ? pbRow.count : 0;
+
+    const setting = await get("SELECT value FROM settings WHERE key = 'phonebook_imported'");
+    phonebookImported = setting ? setting.value === "1" : false;
   } catch (_) {}
 
   return {
     status: connectionStatus,
     syncing: isSyncing && count === 0,
     contactCount: count,
+    phonebookContactCount: phonebookCount,
+    phonebookImported: phonebookImported && phonebookCount > 0,
     qr: currentQr,
     user: userProfile ? {
       id: userProfile.id,
@@ -400,13 +416,23 @@ async function sendWhatsAppMessage(recipient, text, attachments = []) {
 }
 
 async function logoutSession() {
+  console.log("[WhatsApp Engine] Explicit logout triggered. Wiping auth files and resetting phonebook state...");
   if (sock) {
-    try { await sock.logout(); } catch (_) {}
+    try { 
+      await sock.logout(); 
+    } catch (_) {
+      try { sock.end(new Error("Logged out")); } catch (_) {}
+    }
   }
   try { fs.rmSync(AUTH_DIR, { recursive: true, force: true }); } catch (_) {}
+  try {
+    await run("INSERT INTO settings (key, value) VALUES ('phonebook_imported', '0') ON CONFLICT(key) DO UPDATE SET value = '0'");
+    await run("DELETE FROM contacts");
+  } catch (_) {}
   connectionStatus = "disconnected";
   userProfile = null;
   currentQr = null;
+  isSyncing = false;
   setTimeout(initWhatsAppEngine, 1000);
   return { success: true };
 }
