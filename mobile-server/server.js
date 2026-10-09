@@ -260,6 +260,7 @@ app.get("/api/profile-pic", async (req, res) => {
 
 // API: List Scheduled Messages
 app.get("/api/schedules", async (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   try {
     const schedules = await all(`
       SELECT s.*,

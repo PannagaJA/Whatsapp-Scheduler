@@ -419,6 +419,16 @@ textarea {
   color: var(--accent);
 }
 
+.chip:disabled,
+.chip-disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  background: var(--bg-input) !important;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-muted) !important;
+}
+
 /* Suggestions Dropdown */
 .suggestions-dropdown {
   position: absolute;
@@ -576,13 +586,34 @@ textarea {
   font-weight: 700;
 }
 
+@keyframes spinRefresh {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .refresh-btn {
-  background: none;
-  border: none;
+  background: rgba(37, 211, 102, 0.1);
+  border: 1px solid rgba(37, 211, 102, 0.25);
   color: var(--accent);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.refresh-btn:hover,
+.refresh-btn:active {
+  background: rgba(37, 211, 102, 0.2);
+  border-color: var(--accent);
+}
+
+.refresh-btn.refreshing svg {
+  animation: spinRefresh 0.6s linear infinite;
 }
 
 .queue-list {
@@ -1210,6 +1241,8 @@ textarea:disabled {
   animation: pulseHighlight 1.6s infinite !important;
   border-color: #25D366 !important;
   color: #25D366 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
 }
 
 @keyframes pulseHighlight {

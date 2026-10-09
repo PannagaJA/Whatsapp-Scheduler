@@ -261,6 +261,7 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
+        @JavascriptInterface
         public void importAllContacts() {
             runOnUiThread(() -> {
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.READ_CONTACTS)
