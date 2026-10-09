@@ -3,6 +3,7 @@ const {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  Browsers,
   delay
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
@@ -28,9 +29,8 @@ async function initWhatsAppEngine() {
   sock = makeWASocket({
     version,
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: true,
     auth: state,
-    browser: ['WhatsApp Scheduler PWA', 'Chrome', '128.0.0.0'],
+    browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
     generateHighQualityLinkPreview: true
   });
@@ -108,8 +108,14 @@ function getStatus() {
 
 async function requestPairingCode(phoneNumber) {
   if (!sock) throw new Error('WhatsApp engine not initialized');
-  const cleaned = phoneNumber.replace(/\D/g, '');
-  if (!cleaned) throw new Error('Invalid phone number');
+  let cleaned = String(phoneNumber || '').replace(/\D/g, '');
+  if (cleaned.startsWith('0')) cleaned = cleaned.replace(/^0+/, '');
+  if (cleaned.length < 8) throw new Error('Invalid phone number. Include country code (e.g. 919876543210)');
+
+  if (sock.authState?.creds?.registered) {
+    throw new Error('WhatsApp is already registered/linked.');
+  }
+
   const code = await sock.requestPairingCode(cleaned);
   return code;
 }
