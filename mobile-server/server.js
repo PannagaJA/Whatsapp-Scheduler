@@ -80,19 +80,49 @@ app.get("/api/shared/:shareId", (req, res) => {
 
 // API: Status & Diagnostics (returns real-time syncing progress & contact count)
 
+// Cache resolved GitHub release for 15 seconds to be ultra fast and bypass rate limits
+let cachedRelease = { version: null, checkedAt: 0 };
+
 // API: App Version & Direct APK Download Info
-app.get("/api/version", (req, res) => {
-  let pkg = { version: "1.0.1" };
+app.get("/api/version", async (req, res) => {
+  const now = Date.now();
+  if (cachedRelease.version && (now - cachedRelease.checkedAt < 15000)) {
+    return res.json({
+      success: true,
+      version: cachedRelease.version,
+      name: "WhatsApp Scheduler",
+      downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${cachedRelease.version}/WhatsApp-Scheduler.apk`
+    });
+  }
+
   try {
-    pkg = require("./package.json");
-  } catch (_) {}
-  
-  const downloadUrl = process.env.APK_DOWNLOAD_URL || "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk";
+    const ghRes = await fetch("https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest", {
+      redirect: "manual",
+      headers: { "User-Agent": "Mozilla/5.0 WhatsAppScheduler" }
+    });
+    const location = ghRes.headers.get("location");
+    if (location) {
+      const match = location.match(/releases\/tag\/(v?[0-9.]+)/i);
+      if (match && match[1]) {
+        const ver = match[1];
+        cachedRelease = { version: ver, checkedAt: now };
+        return res.json({
+          success: true,
+          version: ver,
+          name: "WhatsApp Scheduler",
+          downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${ver}/WhatsApp-Scheduler.apk`
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to check latest release tag:", err.message);
+  }
+
   res.json({
     success: true,
-    version: pkg.version || "1.0.1",
+    version: cachedRelease.version || "1.0.0",
     name: "WhatsApp Scheduler",
-    downloadUrl
+    downloadUrl: "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk"
   });
 });
 
