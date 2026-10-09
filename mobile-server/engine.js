@@ -41,7 +41,7 @@ async function initWhatsAppEngine() {
     logger: pino({ level: 'silent' }),
     auth: state,
     browser: Browsers.ubuntu('Chrome'),
-    syncFullHistory: false,
+    syncFullHistory: true,
     generateHighQualityLinkPreview: true
   });
 
