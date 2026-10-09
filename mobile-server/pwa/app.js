@@ -186,12 +186,43 @@
     return digits ? `+${digits}` : '';
   }
 
+  // Native Android APK Bridge integration
+  window.onNativeContactsImported = async (contacts) => {
+    try {
+      const list = typeof contacts === 'string' ? JSON.parse(contacts) : contacts;
+      if (Array.isArray(list) && list.length > 0) {
+        showToast(`Syncing ${list.length} phonebook contacts…`, 2500);
+        const res = await fetch('/api/contacts/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contacts: list })
+        });
+        const data = await res.json();
+        await loadContacts();
+        showToast(`✓ Synced ${data.count || list.length} contacts from phone!`, 3500);
+        if (typeof renderContactSuggestions === 'function') {
+          renderContactSuggestions(recipientInput.value);
+        }
+      } else {
+        showToast('No phonebook contacts found on device.');
+      }
+    } catch (err) {
+      console.error('Error importing native contacts:', err);
+      showToast(`Contact sync error: ${err.message}`);
+    }
+  };
+
   const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
-  const vcfPicker = document.getElementById('vcfPicker');
 
   if (pickNativeContactBtn) {
     pickNativeContactBtn.onclick = async () => {
-      // 1. Try Native Mobile Contact Picker API (Chrome on Android / PWA)
+      // 1. Check if running inside Native Android APK (1-tap full sync!)
+      if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === 'function') {
+        window.AndroidNative.importAllContacts();
+        return;
+      }
+
+      // 2. Fallback to Web Contact Picker (in Chrome / Safari)
       if (navigator.contacts && typeof navigator.contacts.select === 'function') {
         try {
           const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
@@ -233,32 +264,31 @@
               } catch (err) {
                 showToast(`Sync error: ${err.message}`);
               }
-              return;
             }
           }
         } catch (err) {
           console.log('Native contact picker cancelled/error:', err);
         }
-      }
-
-      // 2. Fallback: Prompt to import vCard (.vcf) or CSV file from phone contacts
-      if (vcfPicker) {
-        showToast('Select a .vcf / contacts export file from your phone', 3500);
-        vcfPicker.click();
+      } else {
+        showToast('Tip: Install the Android APK for 1-tap full phonebook sync, or use the Import (.vcf) button.');
       }
     };
   }
 
-  // Handle .vcf / .csv file upload
-  if (vcfPicker) {
-    vcfPicker.onchange = async () => {
-      const file = vcfPicker.files?.[0];
+  const importAllVcfBtn = document.getElementById('importAllVcfBtn');
+  const vcfFileInput = document.getElementById('vcfFileInput');
+
+  if (importAllVcfBtn && vcfFileInput) {
+    importAllVcfBtn.onclick = () => {
+      vcfFileInput.click();
+    };
+
+    vcfFileInput.onchange = async () => {
+      const file = vcfFileInput.files?.[0];
       if (!file) return;
       try {
         const text = await file.text();
         const imported = [];
-        
-        // Comprehensive vCard parser (FN:, N:, TEL...)
         const lines = text.split(/\r?\n/);
         let currentName = '';
         let currentTel = '';
@@ -292,15 +322,15 @@
           });
           const data = await res.json();
           await loadContacts();
-          showToast(`✓ Successfully imported ${data.count || imported.length} contacts!`);
+          showToast(`✓ Successfully imported ${data.count || imported.length} contacts!`, 4000);
           renderContactSuggestions(recipientInput.value);
         } else {
-          showToast('No valid contacts found in file');
+          showToast('No valid contacts found in the selected file');
         }
       } catch (err) {
         showToast(`Failed to parse contacts: ${err.message}`);
       } finally {
-        vcfPicker.value = '';
+        vcfFileInput.value = '';
       }
     };
   }

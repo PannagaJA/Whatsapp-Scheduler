@@ -18,7 +18,7 @@ Desktop.ini
 *.njsproj
 *.sln
 *.swp
-*.swo
+*.swp
 *~
 
 # Logs and Runtime Data
@@ -28,18 +28,27 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build, Packaging & Distribution Artifacts
-dist/
-build/
-out/
-*.zip
-*.crx
-*.pem
-
-# Dependencies (if toolchains are added)
+# Dependencies
 node_modules/
 .pnp
 .pnp.js
+
+# WhatsApp Session Auth & Database Files (NEVER COMMIT SENSITIVE DATA)
+auth_info_baileys/
+*.db
+*.sqlite
+*.sqlite3
+
+# Android & Gradle Build Artifacts
+.gradle/
+build/
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+build-output/
 
 # Temporary Files & Scratch Dirs
 tmp/

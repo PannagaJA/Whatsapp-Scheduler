@@ -148,14 +148,29 @@ app.post('/api/contacts/import', async (req, res) => {
       }
 
       const jid = `${normalizedPhone}@s.whatsapp.net`;
+
+      // 1. Update any existing contacts with matching phone or JID
+      if (name) {
+        await run(`
+          UPDATE contacts 
+          SET name = ?, updated_at = ? 
+          WHERE jid = ? 
+             OR phone = ? 
+             OR phone = ? 
+             OR phone = ?
+        `, [name, Date.now(), jid, rawPhone, normalizedPhone, rawPhone.startsWith('91') ? rawPhone.slice(2) : rawPhone]);
+      }
+
+      // 2. Insert or update record
       await run(`
         INSERT INTO contacts (jid, name, phone, is_group, updated_at)
         VALUES (?, ?, ?, 0, ?)
         ON CONFLICT(jid) DO UPDATE SET
           name = coalesce(nullif(excluded.name, ''), contacts.name),
-          phone = excluded.phone,
+          phone = coalesce(nullif(excluded.phone, ''), contacts.phone),
           updated_at = excluded.updated_at
       `, [jid, name, normalizedPhone, Date.now()]);
+
       inserted++;
     }
 
