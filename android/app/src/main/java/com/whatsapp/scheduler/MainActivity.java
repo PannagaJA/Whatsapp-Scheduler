@@ -236,41 +236,53 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public void downloadAndInstallUpdate(String downloadUrl) {
+        public void downloadAndInstallUpdate(final String downloadUrl) {
             runOnUiThread(() -> {
                 Toast.makeText(MainActivity.this, "Downloading WhatsApp Scheduler update…", Toast.LENGTH_SHORT).show();
             });
 
             executorService.execute(() -> {
                 try {
-                    URL url = new URL(downloadUrl);
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setConnectTimeout(15000);
-                    connection.setReadTimeout(30000);
-                    connection.connect();
+                    URL targetUrl = new URL(downloadUrl);
+                    HttpURLConnection conn = (HttpURLConnection) targetUrl.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(30000);
+                    conn.setInstanceFollowRedirects(true);
+                    conn.connect();
 
-                    if (connection.getResponseCode() != HttpURLConnection.HTTP_OK && 
-                        connection.getResponseCode() != HttpURLConnection.HTTP_MOVED_TEMP &&
-                        connection.getResponseCode() != HttpURLConnection.HTTP_MOVED_PERM) {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download failed: Server returned " + connection.getResponseMessage(), Toast.LENGTH_LONG).show());
-                        return;
+                    int responseCode = conn.getResponseCode();
+
+                    // Follow redirect manually if needed
+                    if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                        responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                        responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+                        responseCode == 307 || responseCode == 308) {
+                        String redirectUrl = conn.getHeaderField("Location");
+                        if (redirectUrl != null) {
+                            conn.disconnect();
+                            targetUrl = new URL(redirectUrl);
+                            conn = (HttpURLConnection) targetUrl.openConnection();
+                            conn.setRequestMethod("GET");
+                            conn.setConnectTimeout(15000);
+                            conn.setReadTimeout(30000);
+                            conn.connect();
+                            responseCode = conn.getResponseCode();
+                        }
                     }
 
-                    // Handle redirects if any
-                    String redirectUrl = connection.getHeaderField("Location");
-                    if (redirectUrl != null) {
-                        url = new URL(redirectUrl);
-                        connection = (HttpURLConnection) url.openConnection();
-                        connection.connect();
+                    if (responseCode != HttpURLConnection.HTTP_OK) {
+                        final String errMsg = "Download failed: HTTP " + responseCode;
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, errMsg, Toast.LENGTH_LONG).show());
+                        return;
                     }
 
                     File downloadsDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
                     if (downloadsDir == null) downloadsDir = getCacheDir();
-                    File apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
+                    final File apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
                     if (apkFile.exists()) apkFile.delete();
 
-                    InputStream inputStream = connection.getInputStream();
+                    InputStream inputStream = conn.getInputStream();
                     FileOutputStream outputStream = new FileOutputStream(apkFile);
 
                     byte[] buffer = new byte[8192];
@@ -282,14 +294,15 @@ public class MainActivity extends AppCompatActivity {
                     outputStream.flush();
                     outputStream.close();
                     inputStream.close();
+                    conn.disconnect();
 
                     runOnUiThread(() -> triggerPackageInstaller(apkFile));
 
                 } catch (Exception e) {
                     e.printStackTrace();
+                    final String errText = e.getMessage() != null ? e.getMessage() : "Network error";
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                        // Fallback to opening browser
+                        Toast.makeText(MainActivity.this, "Update error: " + errText, Toast.LENGTH_LONG).show();
                         try {
                             Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
                             startActivity(browserIntent);
