@@ -1060,36 +1060,40 @@ document.addEventListener("DOMContentLoaded", () => {
     let latestTag = null;
     let apkUrl = "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk";
     let releaseName = "New WhatsApp Scheduler Update";
+    let githubApkReady = false;
 
-    // 1. Check server-side /api/version first
-    try {
-      const vRes = await fetch("/api/version");
-      const vData = await vRes.json();
-      if (vData?.success && vData.version) {
-        latestTag = vData.version;
-        if (vData.downloadUrl) apkUrl = vData.downloadUrl;
-      }
-    } catch (_) {}
-
-    // 2. Check GitHub Releases if accessible
+    // 1. Check GitHub Releases first (Source of Truth for compiled APK availability)
     try {
       const ghRes = await fetch("https://api.github.com/repos/PannagaJA/Whatsapp-Scheduler/releases/latest", {
-        headers: { "Accept": "application/vnd.github.v3+json" }
+        headers: { "Accept": "application/vnd.github.v3+json" },
+        cache: "no-store"
       });
       if (ghRes.ok) {
         const release = await ghRes.json();
         if (release && release.tag_name) {
-          latestTag = release.tag_name;
-          if (release.name) releaseName = release.name;
-          if (release.assets && release.assets.length > 0) {
-            const apkAsset = release.assets.find(a => a.name && a.name.toLowerCase().endsWith(".apk"));
-            if (apkAsset && apkAsset.browser_download_url) {
-              apkUrl = apkAsset.browser_download_url;
-            }
+          const apkAsset = release.assets?.find(a => a.name && a.name.toLowerCase().endsWith(".apk"));
+          // Only mark as ready if GitHub Actions has finished publishing the .apk asset!
+          if (apkAsset && apkAsset.browser_download_url) {
+            latestTag = release.tag_name;
+            if (release.name) releaseName = release.name;
+            apkUrl = apkAsset.browser_download_url;
+            githubApkReady = true;
           }
         }
       }
     } catch (_) {}
+
+    // 2. Fallback: If GitHub API was not reachable / private, check /api/version
+    if (!latestTag) {
+      try {
+        const vRes = await fetch("/api/version?t=" + Date.now(), { cache: "no-store" });
+        const vData = await vRes.json();
+        if (vData?.success && vData.version) {
+          latestTag = vData.version;
+          if (vData.downloadUrl) apkUrl = vData.downloadUrl;
+        }
+      } catch (_) {}
+    }
 
     const hasNewRelease = latestTag && isNewerVersion(latestTag, currentVersion);
 
