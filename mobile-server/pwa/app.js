@@ -21,9 +21,19 @@ document.addEventListener("DOMContentLoaded", () => {
   const pickNativeContactBtn = document.getElementById("pickNativeContactBtn");
   const phonebookGateCard = document.getElementById("phonebookGateCard");
   const btnGateSyncPhonebook = document.getElementById("btnGateSyncPhonebook");
+  const waNotConnectedCard = document.getElementById("waNotConnectedCard");
+  const scheduleStatusPill = document.getElementById("scheduleStatusPill");
+  const btnGoToPair = document.getElementById("btnGoToPair");
 
   if (btnGateSyncPhonebook && pickNativeContactBtn) {
     btnGateSyncPhonebook.onclick = () => pickNativeContactBtn.click();
+  }
+
+  if (btnGoToPair) {
+    btnGoToPair.onclick = () => {
+      const devNav = document.querySelector('.nav-item[data-tab="paneDevice"]');
+      if (devNav) devNav.click();
+    };
   }
 
   // DOM Elements - Sync Banner
@@ -67,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let allContacts = [];
   const avatarCache = new Map();
   let qrPollInterval = null;
+  let pairPollInterval = null;
   let statusPollInterval = null;
 
   // Helper: Escape HTML
@@ -216,6 +227,19 @@ document.addEventListener("DOMContentLoaded", () => {
   if (headerStatus) {
     headerStatus.style.cursor = "pointer";
     headerStatus.addEventListener("click", () => switchTab("paneDevice"));
+  }
+
+  if (btnGoToPair) {
+    btnGoToPair.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      switchTab("paneDevice");
+    };
+  }
+
+  if (waNotConnectedCard) {
+    waNotConnectedCard.style.cursor = "pointer";
+    waNotConnectedCard.onclick = () => switchTab("paneDevice");
   }
 
   // Restore active tab immediately on load/refresh
@@ -924,8 +948,31 @@ document.addEventListener("DOMContentLoaded", () => {
   // 11. Real-Time Status & Diagnostics Engine
   function updateInputAvailability(status, isSyncing, count) {
     const isConn = status === "connected";
+    const isConnecting = status === "connecting";
     const phonebookDone = isPhonebookImported();
     const enableInputs = isConn && phonebookDone;
+
+    // Update WhatsApp Not Connected vs Phonebook Gate Cards
+    if (waNotConnectedCard) {
+      if (!isConn) {
+        waNotConnectedCard.style.display = "flex";
+        if (scheduleStatusPill) {
+          if (isConnecting) {
+            scheduleStatusPill.className = "status-pill-badge connecting";
+            scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Connecting…</span>';
+          } else {
+            scheduleStatusPill.className = "status-pill-badge disconnected";
+            scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Disconnected</span>';
+          }
+        }
+      } else {
+        waNotConnectedCard.style.display = "none";
+      }
+    }
+
+    if (phonebookGateCard) {
+      phonebookGateCard.style.display = (isConn && !phonebookDone) ? "flex" : "none";
+    }
 
     if (pickNativeContactBtn) {
       // Allow button to be clicked so it can inform user or trigger sync
@@ -1056,22 +1103,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (devicePill) {
         if (isConn) {
-          devicePill.textContent = "Status: Connected ✓";
+          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#25D366;display:inline-block;"></span><span>Status: Connected ✓</span>`;
           devicePill.style.background = "rgba(37, 211, 102, 0.15)";
           devicePill.style.color = "#25D366";
         } else if (isConnecting) {
-          devicePill.textContent = "Status: Connecting…";
+          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#ffc107;display:inline-block;"></span><span>Status: Connecting…</span>`;
           devicePill.style.background = "rgba(255, 193, 7, 0.15)";
           devicePill.style.color = "#ffc107";
         } else {
-          devicePill.textContent = "Status: Disconnected";
+          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#ff6b6b;display:inline-block;"></span><span>Status: Disconnected</span>`;
           devicePill.style.background = "rgba(234, 67, 53, 0.15)";
           devicePill.style.color = "#ff6b6b";
         }
       }
 
       if (deviceUserInfo) {
-        if ((isConn || isConnecting) && data.user) {
+        if (isConn && data.user) {
           const syncLabel = isPhonebookImportedState
             ? `<small style="color: #25D366; font-weight: 600;">✓ ${phonebookCount || allContacts.length} Phonebook Contacts Synced</small>`
             : `<small style="color: #ffc107; font-weight: 600;">⚠️ Phonebook Not Synced (Required for Scheduling)</small>`;
@@ -1079,7 +1126,18 @@ document.addEventListener("DOMContentLoaded", () => {
           deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || "")} (${data.user.id ? data.user.id.split(":")[0] : ""})<br>${syncLabel}`;
           deviceUserInfo.style.display = "block";
         } else {
-          deviceUserInfo.style.display = "none";
+          deviceUserInfo.innerHTML = `<div class="device-disconnected-guide">
+            <div class="guide-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <span>How to connect your WhatsApp:</span>
+            </div>
+            <ol class="guide-steps">
+              <li>Tap <strong>Show QR Code</strong> or <strong>8-Digit Pairing Code</strong> below</li>
+              <li>Open WhatsApp on phone &gt; <strong>Linked Devices</strong> &gt; <strong>Link a Device</strong></li>
+              <li>Scan QR or enter code to pair autonomously</li>
+            </ol>
+          </div>`;
+          deviceUserInfo.style.display = "block";
         }
       }
 
@@ -1104,6 +1162,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (pairModal && pairModal.classList.contains("active")) {
           pairModal.classList.remove("active");
+          if (pairPollInterval) { clearInterval(pairPollInterval); pairPollInterval = null; }
           showToast("✓ WhatsApp Connected Successfully!");
           switchTab("paneSchedule");
         }
@@ -1197,6 +1256,8 @@ document.addEventListener("DOMContentLoaded", () => {
           pairPhoneInput.value = "";
           setTimeout(() => pairPhoneInput.focus(), 150);
         }
+        if (pairPollInterval) clearInterval(pairPollInterval);
+        pairPollInterval = setInterval(checkStatus, 1000);
       }
     };
   }
@@ -1204,6 +1265,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (pairModalClose) {
     pairModalClose.onclick = () => {
       if (pairModal) pairModal.classList.remove("active");
+      if (pairPollInterval) { clearInterval(pairPollInterval); pairPollInterval = null; }
     };
   }
 
@@ -1215,6 +1277,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (pairModal && e.target === pairModal) {
       pairModal.classList.remove("active");
+      if (pairPollInterval) { clearInterval(pairPollInterval); pairPollInterval = null; }
     }
   });
 
@@ -1350,11 +1413,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const hasNewRelease = latestTag && isNewerVersion(latestTag, currentVersion);
 
     // Update Device Link "App Updates & APK" Card
+    const curVerClean = (currentVersion || "1.0.0").replace(/^[vV]+/, "");
+    const latestTagClean = latestTag ? latestTag.replace(/^[vV]+/, "") : curVerClean;
+
     if (deviceAppVersion) {
       if (hasNewRelease) {
-        deviceAppVersion.innerHTML = "Current: <strong>v" + currentVersion + "</strong> · <span style='color: #25D366; font-weight: 700;'>Update Available: v" + latestTag + "</span>";
+        deviceAppVersion.innerHTML = `Current: <strong>v${curVerClean}</strong> · <span style="color: #25D366; font-weight: 700;">Update Available: v${latestTagClean}</span>`;
       } else {
-        deviceAppVersion.innerHTML = "Current: <strong>v" + currentVersion + "</strong> · <span style='color: #25D366; font-weight: 600;'>✓ Up to Date</span>";
+        deviceAppVersion.innerHTML = `Current: <strong>v${curVerClean}</strong> · <span style="color: #25D366; font-weight: 600;">✓ Up to Date</span>`;
       }
     }
 
@@ -1362,7 +1428,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hasNewRelease) {
         btnDownloadApkDirect.disabled = false;
         btnDownloadApkDirect.classList.remove("btn-disabled");
-        btnDownloadApkDirect.innerHTML = "<span>Download Update</span>";
+        btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download Update</span>';
         btnDownloadApkDirect.onclick = () => {
           if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
             showToast("Starting APK download…", 3000);
@@ -1374,7 +1440,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         btnDownloadApkDirect.disabled = true;
         btnDownloadApkDirect.classList.add("btn-disabled");
-        btnDownloadApkDirect.innerHTML = "<span>Latest Version ✓</span>";
+        btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Up to Date</span>';
         btnDownloadApkDirect.onclick = null;
       }
     }
