@@ -1057,3 +1057,161 @@ textarea:disabled {
 .btn-update-now:active {
   transform: scale(0.96);
 }
+
+
+/* === Queue / Scheduled Messages Cards === */
+.queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.queue-head h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.queue-card:active {
+  border-color: rgba(37, 211, 102, 0.4);
+}
+
+.queue-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.queue-recipient-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-recipient {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-phone-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  padding-left: 20px;
+}
+
+.queue-status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.badge-scheduled {
+  background: rgba(37, 211, 102, 0.15);
+  color: #25D366;
+  border: 1px solid rgba(37, 211, 102, 0.35);
+}
+
+.badge-sent {
+  background: rgba(37, 211, 102, 0.2);
+  color: #25D366;
+  border: 1px solid rgba(37, 211, 102, 0.4);
+}
+
+.badge-failed {
+  background: rgba(234, 67, 53, 0.15);
+  color: #ff6b6b;
+  border: 1px solid rgba(234, 67, 53, 0.35);
+}
+
+.badge-processing {
+  background: rgba(255, 193, 7, 0.15);
+  color: #ffc107;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+.queue-message-preview {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 3px solid #25D366;
+  word-break: break-word;
+}
+
+.queue-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-light);
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.queue-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-cancel-schedule {
+  background: rgba(234, 67, 53, 0.1);
+  border: 1px solid rgba(234, 67, 53, 0.3);
+  color: #ff6b6b;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-cancel-schedule:hover {
+  background: #ea4335;
+  color: #ffffff;
+}
+
+/* Phonebook Pulse highlight when mandatory */
+.btn-phonebook-mandatory {
+  animation: pulseHighlight 1.6s infinite !important;
+  border-color: #25D366 !important;
+  color: #25D366 !important;
+}
+
+@keyframes pulseHighlight {
+  0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.6); }
+  70% { box-shadow: 0 0 0 10px rgba(37, 211, 102, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); }
+}

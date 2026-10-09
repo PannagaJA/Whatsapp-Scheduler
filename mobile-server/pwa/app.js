@@ -695,27 +695,38 @@ document.addEventListener("DOMContentLoaded", () => {
     const isConnecting = status === "connecting";
     const hasContacts = allContacts.length > 0 || count > 0;
 
-    const enableInputs = isConn || isConnecting || hasContacts;
-
-    if (recipientInput) {
-      recipientInput.disabled = !enableInputs;
-      if (!enableInputs) {
-        recipientInput.classList.add("input-disabled");
-        recipientInput.placeholder = "⚠️ Link WhatsApp in Device Link to schedule messages";
-      } else {
-        recipientInput.classList.remove("input-disabled");
-        recipientInput.placeholder = "Name or +919876543210…";
-      }
-    }
+    // Phonebook import is mandatory after WhatsApp connects
+    const isContactsImported = hasContacts;
+    const enableInputs = isConn && isContactsImported;
 
     if (pickNativeContactBtn) {
       pickNativeContactBtn.disabled = !isConn;
       if (!isConn) {
         pickNativeContactBtn.classList.add("btn-disabled");
+        pickNativeContactBtn.classList.remove("btn-phonebook-mandatory");
         pickNativeContactBtn.title = "Connect WhatsApp first to sync phonebook";
+      } else if (!isContactsImported) {
+        pickNativeContactBtn.classList.remove("btn-disabled");
+        pickNativeContactBtn.classList.add("btn-phonebook-mandatory");
+        pickNativeContactBtn.title = "Action Required: Tap to import phonebook contacts";
       } else {
         pickNativeContactBtn.classList.remove("btn-disabled");
-        pickNativeContactBtn.title = "Sync contacts from phonebook";
+        pickNativeContactBtn.classList.remove("btn-phonebook-mandatory");
+        pickNativeContactBtn.title = "Phonebook contacts synced";
+      }
+    }
+
+    if (recipientInput) {
+      recipientInput.disabled = !enableInputs;
+      if (!isConn) {
+        recipientInput.classList.add("input-disabled");
+        recipientInput.placeholder = "⚠️ Link WhatsApp in Device Link to schedule messages";
+      } else if (!isContactsImported) {
+        recipientInput.classList.add("input-disabled");
+        recipientInput.placeholder = "👉 Tap \x27📇 Phonebook\x27 button above to sync contacts first";
+      } else {
+        recipientInput.classList.remove("input-disabled");
+        recipientInput.placeholder = "Type contact name or +919876543210…";
       }
     }
 
