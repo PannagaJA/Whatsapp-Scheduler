@@ -111,8 +111,9 @@ app.post('/api/logout', async (req, res) => {
 app.get('/api/contacts', async (req, res) => {
   try {
     const contacts = await all(`
-      SELECT jid, coalesce(nullif(name, ''), phone, jid) as name, phone, is_group 
+      SELECT jid, coalesce(nullif(name, ''), phone, '') as name, phone, is_group 
       FROM contacts 
+      WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
       ORDER BY updated_at DESC, name ASC 
       LIMIT 500
     `);

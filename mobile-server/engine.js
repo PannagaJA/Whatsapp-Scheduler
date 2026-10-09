@@ -94,16 +94,24 @@ async function initWhatsAppEngine() {
 
   // Helper to persist contacts into SQLite
   async function upsertContactRecord(jid, rawName, rawPhone, isGroup = 0) {
-    if (!jid || jid === 'status@broadcast') return;
+    if (!jid || jid === 'status@broadcast' || jid.endsWith('@lid') || jid.includes('broadcast')) return;
+    if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us')) return;
+
     const isGrp = isGroup || (jid.endsWith('@g.us') ? 1 : 0);
     const phone = rawPhone || (isGrp ? '' : jid.split('@')[0].replace(/\D/g, ''));
-    const name = rawName || '';
+    let name = (rawName || '').trim();
+    if (name.includes('@') || name === phone) name = '';
+
     try {
       await run(`
         INSERT INTO contacts (jid, name, phone, is_group, updated_at)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(jid) DO UPDATE SET
-          name = coalesce(nullif(excluded.name, ''), contacts.name),
+          name = CASE
+            WHEN nullif(excluded.name, '') IS NOT NULL THEN excluded.name
+            WHEN contacts.name LIKE '%@%' OR contacts.name = contacts.phone THEN ''
+            ELSE contacts.name
+          END,
           phone = coalesce(nullif(excluded.phone, ''), contacts.phone),
           updated_at = excluded.updated_at
       `, [jid, name, phone, isGrp, Date.now()]);

@@ -39,6 +39,9 @@ db.serialize(() => {
     )
   `);
 
+  // Clean up any internal @lid entries from contacts
+  db.run(`DELETE FROM contacts WHERE jid LIKE '%@lid' OR (jid NOT LIKE '%@s.whatsapp.net' AND jid NOT LIKE '%@g.us')`, () => {});
+
   // Key-value settings table
   db.run(`
     CREATE TABLE IF NOT EXISTS settings (

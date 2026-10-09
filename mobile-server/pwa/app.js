@@ -283,9 +283,11 @@
 
     // List items created via DOM elements
     matches.forEach(c => {
+      const displayName = c.name || (c.phone ? (c.phone.startsWith('91') ? '+91 ' + c.phone.slice(2) : '+' + c.phone) : (c.jid ? c.jid.split('@')[0] : ''));
       const item = document.createElement('div');
       item.className = 'suggestion-item';
-      item.setAttribute('data-recipient', c.jid || c.phone || c.name);
+      item.setAttribute('data-jid', c.jid || '');
+      item.setAttribute('data-display', displayName);
 
       // Avatar
       const avatarEl = document.createElement('div');
@@ -308,26 +310,27 @@
 
       const nameEl = document.createElement('span');
       nameEl.className = 'suggestion-name';
-      nameEl.textContent = c.name || c.phone || c.jid;
+      nameEl.textContent = displayName;
 
       const phoneEl = document.createElement('span');
       phoneEl.className = 'suggestion-phone';
       if (c.is_group) {
         phoneEl.textContent = 'WhatsApp Group';
-      } else if (c.phone) {
+      } else if (c.phone && c.name) {
         phoneEl.textContent = c.phone.startsWith('91') ? '+91 ' + c.phone.slice(2) : '+' + c.phone;
       } else {
         phoneEl.textContent = '';
       }
 
       detailsEl.appendChild(nameEl);
-      detailsEl.appendChild(phoneEl);
+      if (phoneEl.textContent) detailsEl.appendChild(phoneEl);
 
       item.appendChild(avatarEl);
       item.appendChild(detailsEl);
 
       item.onclick = () => {
-        recipientInput.value = item.getAttribute('data-recipient');
+        if (c.jid) recipientInput.dataset.jid = c.jid;
+        recipientInput.value = displayName;
         contactsDropdown.style.display = 'none';
       };
 
@@ -346,6 +349,7 @@
   };
 
   recipientInput.oninput = () => {
+    delete recipientInput.dataset.jid;
     renderContactSuggestions(recipientInput.value);
   };
 
@@ -358,7 +362,7 @@
   // 8. Submit Schedule Form
   scheduleForm.onsubmit = async (e) => {
     e.preventDefault();
-    const recipient = recipientInput.value.trim();
+    const recipient = recipientInput.dataset.jid || recipientInput.value.trim();
     const text = messageInput.value.trim();
     const dateVal = dateInput.value;
     const timeVal = timeInput.value;
