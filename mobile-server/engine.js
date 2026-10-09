@@ -204,10 +204,17 @@ async function initWhatsAppEngine() {
   return sock;
 }
 
-function getStatus() {
+async function getStatus() {
+  let count = 0;
+  try {
+    const row = await get('SELECT COUNT(*) as count FROM contacts');
+    count = row ? row.count : 0;
+  } catch (_) {}
+
   return {
     status: connectionStatus,
     syncing: isSyncing,
+    contactCount: count,
     qr: currentQr,
     user: userProfile ? {
       id: userProfile.id,
@@ -220,7 +227,13 @@ async function requestPairingCode(phoneNumber) {
   if (!sock) throw new Error('WhatsApp engine not initialized');
   let cleaned = String(phoneNumber || '').replace(/\D/g, '');
   if (cleaned.startsWith('0')) cleaned = cleaned.replace(/^0+/, '');
-  if (cleaned.length < 8) throw new Error('Invalid phone number. Include country code (e.g. 919876543210)');
+  
+  // Auto-prepend 91 if user entered standard 10-digit mobile number without country code
+  if (cleaned.length === 10) {
+    cleaned = '91' + cleaned;
+  }
+
+  if (cleaned.length < 8) throw new Error('Invalid phone number. Please enter a valid 10-digit mobile number.');
 
   if (sock.authState?.creds?.registered) {
     throw new Error('WhatsApp is already registered/linked.');

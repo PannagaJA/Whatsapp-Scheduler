@@ -977,3 +977,83 @@ button[disabled] {
   color: var(--text-muted);
   font-family: var(--font-mono, monospace);
 }
+
+.input-disabled,
+input:disabled,
+textarea:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text-muted) !important;
+}
+
+/* === In-App Auto-Update Banner === */
+.update-banner {
+  background: linear-gradient(135deg, rgba(37, 211, 102, 0.15), rgba(0, 168, 132, 0.25));
+  border: 1px solid rgba(37, 211, 102, 0.4);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  animation: slideDown 0.3s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.update-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.update-icon {
+  font-size: 22px;
+}
+
+.update-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.update-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.update-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-update-dismiss {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-update-now {
+  background: #25D366;
+  border: none;
+  color: #0b141a;
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.btn-update-now:active {
+  transform: scale(0.96);
+}

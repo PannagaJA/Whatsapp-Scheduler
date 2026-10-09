@@ -2,12 +2,15 @@ package com.whatsapp.scheduler;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.ContactsContract;
+import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -22,11 +25,17 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -37,11 +46,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String APP_URL = "https://my-whatsapp-scheduler.onrender.com";
     private static final int PERMISSION_REQ_CONTACTS = 101;
     private static final int FILE_CHOOSER_REQ = 102;
+    private static final int INSTALL_PERMISSION_REQ = 103;
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefreshLayout;
     private ValueCallback<Uri[]> filePathCallback;
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private String pendingInstallApkPath = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +77,6 @@ public class MainActivity extends AppCompatActivity {
             ContextCompat.getColor(this, R.color.background)
         );
 
-        // Only allow pull-to-refresh when at the top of webview
         swipeRefreshLayout.setOnRefreshListener(() -> webView.reload());
         webView.getViewTreeObserver().addOnScrollChangedListener(() -> {
             swipeRefreshLayout.setEnabled(webView.getScrollY() == 0);
@@ -90,7 +100,6 @@ public class MainActivity extends AppCompatActivity {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
 
-        // Add Native JavaScript Bridge
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidNative");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -156,6 +165,12 @@ public class MainActivity extends AppCompatActivity {
                 filePathCallback.onReceiveValue(results);
                 filePathCallback = null;
             }
+        } else if (requestCode == INSTALL_PERMISSION_REQ) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (getPackageManager().canRequestPackageInstalls() && pendingInstallApkPath != null) {
+                    triggerPackageInstaller(new File(pendingInstallApkPath));
+                }
+            }
         }
     }
 
@@ -185,6 +200,26 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public String getAppVersionName() {
+            try {
+                PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+                return pInfo.versionName;
+            } catch (Exception e) {
+                return "1.0.0";
+            }
+        }
+
+        @JavascriptInterface
+        public int getAppVersionCode() {
+            try {
+                PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+                return pInfo.versionCode;
+            } catch (Exception e) {
+                return 1;
+            }
+        }
+
+        @JavascriptInterface
         public void importAllContacts() {
             runOnUiThread(() -> {
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.READ_CONTACTS)
@@ -198,6 +233,100 @@ public class MainActivity extends AppCompatActivity {
                     );
                 }
             });
+        }
+
+        @JavascriptInterface
+        public void downloadAndInstallUpdate(String downloadUrl) {
+            runOnUiThread(() -> {
+                Toast.makeText(MainActivity.this, "Downloading WhatsApp Scheduler update…", Toast.LENGTH_SHORT).show();
+            });
+
+            executorService.execute(() -> {
+                try {
+                    URL url = new URL(downloadUrl);
+                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+                    connection.setRequestMethod("GET");
+                    connection.setConnectTimeout(15000);
+                    connection.setReadTimeout(30000);
+                    connection.connect();
+
+                    if (connection.getResponseCode() != HttpURLConnection.HTTP_OK && 
+                        connection.getResponseCode() != HttpURLConnection.HTTP_MOVED_TEMP &&
+                        connection.getResponseCode() != HttpURLConnection.HTTP_MOVED_PERM) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Download failed: Server returned " + connection.getResponseMessage(), Toast.LENGTH_LONG).show());
+                        return;
+                    }
+
+                    // Handle redirects if any
+                    String redirectUrl = connection.getHeaderField("Location");
+                    if (redirectUrl != null) {
+                        url = new URL(redirectUrl);
+                        connection = (HttpURLConnection) url.openConnection();
+                        connection.connect();
+                    }
+
+                    File downloadsDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                    if (downloadsDir == null) downloadsDir = getCacheDir();
+                    File apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
+                    if (apkFile.exists()) apkFile.delete();
+
+                    InputStream inputStream = connection.getInputStream();
+                    FileOutputStream outputStream = new FileOutputStream(apkFile);
+
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        outputStream.write(buffer, 0, bytesRead);
+                    }
+
+                    outputStream.flush();
+                    outputStream.close();
+                    inputStream.close();
+
+                    runOnUiThread(() -> triggerPackageInstaller(apkFile));
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        // Fallback to opening browser
+                        try {
+                            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl));
+                            startActivity(browserIntent);
+                        } catch (_) {}
+                    });
+                }
+            });
+        }
+    }
+
+    private void triggerPackageInstaller(File apkFile) {
+        if (apkFile == null || !apkFile.exists()) return;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!getPackageManager().canRequestPackageInstalls()) {
+                pendingInstallApkPath = apkFile.getAbsolutePath();
+                Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, INSTALL_PERMISSION_REQ);
+                return;
+            }
+        }
+
+        try {
+            Uri apkUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    apkFile
+            );
+
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(installIntent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to launch installer: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -266,7 +395,6 @@ public class MainActivity extends AppCompatActivity {
             final String jsonPayload = contactsArray.toString();
 
             runOnUiThread(() -> {
-                // Safely evaluate javascript in webview
                 String script = String.format(
                         "if (window.onNativeContactsImported) { window.onNativeContactsImported(%s); }",
                         jsonPayload

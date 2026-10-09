@@ -80,16 +80,38 @@ app.get('/api/shared/:shareId', (req, res) => {
   }
 });
 
-// API: Status & QR
-app.get('/api/status', (req, res) => {
-  res.json({ success: true, ...getStatus() });
+// API: Status & Diagnostics (returns real-time syncing progress & contact count)
+app.get('/api/status', async (req, res) => {
+  try {
+    const status = await getStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// API: Request 8-digit Pairing Code
+// API: Dedicated QR Code Endpoint
+app.get('/api/qr', async (req, res) => {
+  try {
+    const status = await getStatus();
+    res.json({ 
+      success: true, 
+      qr: status.qr || null, 
+      status: status.status, 
+      connected: status.status === 'connected' 
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API: Request 8-digit Pairing Code (accepts phoneNumber or phone)
 app.post('/api/pair-code', async (req, res) => {
   try {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) return res.status(400).json({ success: false, error: 'Phone number required' });
+    const phoneNumber = req.body.phoneNumber || req.body.phone;
+    if (!phoneNumber) {
+      return res.status(400).json({ success: false, error: 'Phone number is required (e.g. 919876543210)' });
+    }
     const code = await requestPairingCode(phoneNumber);
     res.json({ success: true, code });
   } catch (err) {
