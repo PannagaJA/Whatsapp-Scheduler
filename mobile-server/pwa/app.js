@@ -174,17 +174,46 @@
   checkIncomingShare();
 
   // 7. Contact Autocomplete & Native Phone Contact Picker
+  function formatPhone(phone) {
+    if (!phone) return '';
+    const digits = String(phone).replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+      return `+91 ${digits.slice(2, 7)} ${digits.slice(7)}`;
+    }
+    if (digits.length === 10) {
+      return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+    }
+    return digits ? `+${digits}` : '';
+  }
+
   const pickNativeContactBtn = document.getElementById('pickNativeContactBtn');
   if ('contacts' in navigator && 'ContactsManager' in window) {
     pickNativeContactBtn.style.display = 'inline-block';
     pickNativeContactBtn.onclick = async () => {
       try {
-        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: false });
-        if (contacts && contacts[0]) {
-          const c = contacts[0];
-          const tel = c.tel && c.tel[0] ? c.tel[0].replace(/\D/g, '') : '';
-          const name = c.name && c.name[0] ? c.name[0] : '';
-          recipientInput.value = name || tel;
+        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+        if (contacts && contacts.length > 0) {
+          const formatted = [];
+          for (const c of contacts) {
+            const name = c.name && c.name[0] ? c.name[0] : '';
+            const tel = c.tel && c.tel[0] ? c.tel[0].replace(/\D/g, '') : '';
+            if (tel) formatted.push({ name, phone: tel });
+          }
+
+          if (formatted.length > 0) {
+            // Pick first contact for the input
+            const first = formatted[0];
+            recipientInput.value = first.name || formatPhone(first.phone);
+
+            // Import all selected contacts to server database in background
+            fetch('/api/contacts/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contacts: formatted })
+            }).then(() => loadContacts()).catch(() => {});
+
+            showToast(`✓ Selected ${first.name || formatPhone(first.phone)}`);
+          }
         }
       } catch (err) {
         console.log('Native contact picker error:', err);
@@ -247,7 +276,7 @@
       const filtered = allContacts.filter(c => {
         const cName = (c.name || '').toLowerCase();
         const cPhone = (c.phone || '').replace(/\D/g, '');
-        if (cName.includes(q)) return true;
+        if (cName && cName.includes(q)) return true;
         if (qDigits) {
           if (cPhone.includes(qDigits)) return true;
           if (qDigits.length === 10 && cPhone === '91' + qDigits) return true;
@@ -288,7 +317,10 @@
 
     // List items created via DOM elements
     matches.forEach(c => {
-      const displayName = c.name || (c.phone ? (c.phone.startsWith('91') ? '+91 ' + c.phone.slice(2) : '+' + c.phone) : (c.jid ? c.jid.split('@')[0] : ''));
+      const hasName = Boolean(c.name && c.name.trim());
+      const formattedNumber = formatPhone(c.phone);
+      const displayName = hasName ? c.name : (formattedNumber || (c.jid ? c.jid.split('@')[0] : ''));
+
       const item = document.createElement('div');
       item.className = 'suggestion-item';
       item.setAttribute('data-jid', c.jid || '');
@@ -321,14 +353,14 @@
       phoneEl.className = 'suggestion-phone';
       if (c.is_group) {
         phoneEl.textContent = 'WhatsApp Group';
-      } else if (c.phone && c.name) {
-        phoneEl.textContent = c.phone.startsWith('91') ? '+91 ' + c.phone.slice(2) : '+' + c.phone;
+      } else if (hasName && formattedNumber) {
+        phoneEl.textContent = formattedNumber;
       } else {
-        phoneEl.textContent = '';
+        phoneEl.textContent = 'WhatsApp Chat';
       }
 
       detailsEl.appendChild(nameEl);
-      if (phoneEl.textContent) detailsEl.appendChild(phoneEl);
+      detailsEl.appendChild(phoneEl);
 
       item.appendChild(avatarEl);
       item.appendChild(detailsEl);

@@ -111,13 +111,55 @@ app.post('/api/logout', async (req, res) => {
 app.get('/api/contacts', async (req, res) => {
   try {
     const contacts = await all(`
-      SELECT jid, coalesce(nullif(name, ''), phone, '') as name, phone, is_group 
+      SELECT jid, 
+             coalesce(nullif(name, ''), '') as name, 
+             phone, 
+             is_group 
       FROM contacts 
       WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
-      ORDER BY is_group ASC, updated_at DESC, name ASC 
+      ORDER BY is_group ASC, (CASE WHEN nullif(name, '') IS NOT NULL THEN 0 ELSE 1 END), updated_at DESC
       LIMIT 1000
     `);
     res.json({ success: true, contacts, count: contacts.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API: Bulk Import Contacts (from Phonebook sync)
+app.post('/api/contacts/import', async (req, res) => {
+  try {
+    const { contacts } = req.body;
+    if (!Array.isArray(contacts) || contacts.length === 0) {
+      return res.status(400).json({ success: false, error: 'No contacts provided' });
+    }
+
+    let inserted = 0;
+    for (const c of contacts) {
+      const name = (c.name || '').trim();
+      let rawPhone = String(c.phone || c.tel || '').replace(/\D/g, '');
+      if (!rawPhone || rawPhone.length < 7) continue;
+
+      let normalizedPhone = rawPhone;
+      if (rawPhone.length === 10) {
+        normalizedPhone = '91' + rawPhone;
+      } else if (rawPhone.length === 11 && rawPhone.startsWith('0')) {
+        normalizedPhone = '91' + rawPhone.slice(1);
+      }
+
+      const jid = `${normalizedPhone}@s.whatsapp.net`;
+      await run(`
+        INSERT INTO contacts (jid, name, phone, is_group, updated_at)
+        VALUES (?, ?, ?, 0, ?)
+        ON CONFLICT(jid) DO UPDATE SET
+          name = coalesce(nullif(excluded.name, ''), contacts.name),
+          phone = excluded.phone,
+          updated_at = excluded.updated_at
+      `, [jid, name, normalizedPhone, Date.now()]);
+      inserted++;
+    }
+
+    res.json({ success: true, count: inserted });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
