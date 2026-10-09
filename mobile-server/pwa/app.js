@@ -249,6 +249,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".preset-chips .chip").forEach(chip => {
     chip.addEventListener("click", (e) => {
       e.preventDefault();
+      if (!isPhonebookImported()) {
+        showToast("🔒 Action Required: Tap 'Sync Phonebook' above to import contacts first!");
+        const gateCard = document.getElementById("phonebookGateCard");
+        if (gateCard) gateCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
       document.querySelectorAll(".preset-chips .chip").forEach(b => b.classList.remove("active"));
       chip.classList.add("active");
 
@@ -281,9 +287,36 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  if (dateInput) {
+    dateInput.addEventListener("click", (e) => {
+      if (!isPhonebookImported()) {
+        e.preventDefault();
+        dateInput.blur();
+        showToast("🔒 Action Required: Tap 'Sync Phonebook' above to import contacts first!");
+      }
+    });
+  }
+  if (timeInput) {
+    timeInput.addEventListener("click", (e) => {
+      if (!isPhonebookImported()) {
+        e.preventDefault();
+        timeInput.blur();
+        showToast("🔒 Action Required: Tap 'Sync Phonebook' above to import contacts first!");
+      }
+    });
+  }
+
   // 5. Attachments Handling
   if (addFileBtn && filePicker) {
-    addFileBtn.onclick = () => filePicker.click();
+    addFileBtn.onclick = () => {
+      if (!isPhonebookImported()) {
+        showToast("🔒 Action Required: Tap 'Sync Phonebook' above to import contacts first!");
+        const gateCard = document.getElementById("phonebookGateCard");
+        if (gateCard) gateCard.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      filePicker.click();
+    };
     filePicker.onchange = () => {
       if (filePicker.files) {
         for (const f of filePicker.files) {
@@ -393,58 +426,65 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  if (pickNativeContactBtn) {
-    pickNativeContactBtn.onclick = async () => {
-      if (headerStatus && !headerStatus.classList.contains("connected")) {
-        showToast("Please connect WhatsApp first before syncing contacts.");
-        return;
-      }
+  async function triggerPhonebookSync() {
+    const isConn = headerStatus && headerStatus.classList.contains("connected");
+    if (!isConn) {
+      showToast("⚠️ Please connect WhatsApp first in Device Link tab.");
+      switchTab("paneDevice");
+      return;
+    }
 
-      if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === "function") {
-        updateSyncProgress(10, "Requesting Android phonebook permission…");
-        window.AndroidNative.importAllContacts();
-        return;
-      }
+    if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === "function") {
+      updateSyncProgress(10, "Reading Android phonebook contacts…");
+      window.AndroidNative.importAllContacts();
+      return;
+    }
 
-      if (navigator.contacts && typeof navigator.contacts.select === "function") {
-        try {
-          const contacts = await navigator.contacts.select(["name", "tel"], { multiple: true });
-          if (contacts && contacts.length > 0) {
-            const formatted = [];
-            for (const c of contacts) {
-              const name = c.name && c.name[0] ? c.name[0].trim() : "";
-              const telList = c.tel || [];
-              for (const t of telList) {
-                const digits = String(t).replace(/\D/g, "");
-                if (digits.length >= 7) {
-                  formatted.push({ name, phone: digits });
-                }
+    if (navigator.contacts && typeof navigator.contacts.select === "function") {
+      try {
+        const contacts = await navigator.contacts.select(["name", "tel"], { multiple: true });
+        if (contacts && contacts.length > 0) {
+          const formatted = [];
+          for (const c of contacts) {
+            const name = c.name && c.name[0] ? c.name[0].trim() : "";
+            const telList = c.tel || [];
+            for (const t of telList) {
+              const digits = String(t).replace(/\D/g, "");
+              if (digits.length >= 7) {
+                formatted.push({ name, phone: digits });
               }
             }
-
-            if (formatted.length > 0) {
-              updateSyncProgress(40, `Importing ${formatted.length} contacts…`);
-              const res = await fetch("/api/contacts/import", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contacts: formatted })
-              });
-              const data = await res.json();
-              await checkStatus();
-              await loadContacts();
-              const count = data.count || formatted.length;
-              updateSyncProgress(100, `✓ Synced ${count} contacts!`, true);
-              showToast(`✓ Imported ${count} contacts with names!`);
-              if (recipientInput) renderContactSuggestions(recipientInput.value);
-            }
           }
-        } catch (err) {
-          console.log("Contact picker cancelled/error:", err);
+
+          if (formatted.length > 0) {
+            updateSyncProgress(40, `Importing ${formatted.length} contacts…`);
+            const res = await fetch("/api/contacts/import", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ contacts: formatted })
+            });
+            const data = await res.json();
+            await checkStatus();
+            await loadContacts();
+            const count = data.count || formatted.length;
+            updateSyncProgress(100, `✓ Synced ${count} contacts!`, true);
+            showToast(`✓ Imported ${count} contacts with names!`);
+            if (recipientInput) renderContactSuggestions(recipientInput.value);
+          }
         }
-      } else {
-        showToast("Tip: Install the Android APK for 1-tap full phonebook sync.");
+      } catch (err) {
+        console.log("Contact picker cancelled/error:", err);
       }
-    };
+    } else {
+      showToast("Tip: Please use the Android APK for 1-tap full phonebook sync.");
+    }
+  }
+
+  if (pickNativeContactBtn) {
+    pickNativeContactBtn.onclick = triggerPhonebookSync;
+  }
+  if (btnGateSyncPhonebook) {
+    btnGateSyncPhonebook.onclick = triggerPhonebookSync;
   }
 
   // 8. Contact Autocomplete Engine
@@ -737,14 +777,34 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 10. Schedules Queue Manager
-  async function loadSchedules() {
+  async function loadSchedules(showFeedback = false) {
     if (!queueList) return;
+    if (refreshQueueBtn) {
+      refreshQueueBtn.classList.add("refreshing");
+      const icon = refreshQueueBtn.querySelector("svg");
+      if (icon) icon.style.animation = "spinRefresh 0.6s linear infinite";
+    }
+
     try {
-      const res = await fetch("/api/schedules");
+      const res = await fetch(`/api/schedules?_t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
       renderSchedules(data.schedules || []);
+      if (showFeedback) {
+        showToast("✓ Queue Refreshed!");
+      }
     } catch (_) {
-      queueList.innerHTML = `<div class="empty-state">Failed to load queue. Pull to refresh.</div>`;
+      queueList.innerHTML = `<div class="empty-state">Failed to load queue. Tap refresh to retry.</div>`;
+      if (showFeedback) {
+        showToast("Failed to refresh queue");
+      }
+    } finally {
+      if (refreshQueueBtn) {
+        setTimeout(() => {
+          refreshQueueBtn.classList.remove("refreshing");
+          const icon = refreshQueueBtn.querySelector("svg");
+          if (icon) icon.style.animation = "";
+        }, 400);
+      }
     }
   }
 
@@ -858,7 +918,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (refreshQueueBtn) {
-    refreshQueueBtn.onclick = () => loadSchedules();
+    refreshQueueBtn.onclick = () => loadSchedules(true);
   }
 
   // 11. Real-Time Status & Diagnostics Engine
@@ -868,7 +928,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const enableInputs = isConn && phonebookDone;
 
     if (pickNativeContactBtn) {
-      pickNativeContactBtn.disabled = !isConn;
+      // Allow button to be clicked so it can inform user or trigger sync
+      pickNativeContactBtn.disabled = false;
       if (!isConn) {
         pickNativeContactBtn.classList.add("btn-disabled");
         pickNativeContactBtn.classList.remove("btn-phonebook-mandatory");
@@ -902,13 +963,52 @@ document.addEventListener("DOMContentLoaded", () => {
       messageInput.disabled = !enableInputs;
       if (!enableInputs) {
         messageInput.classList.add("input-disabled");
-        messageInput.placeholder = !isConn ? "Connect WhatsApp to compose messages…" : "Sync phonebook contacts first…";
+        messageInput.placeholder = !isConn ? "Connect WhatsApp to compose messages…" : "Sync phonebook contacts first to compose messages…";
       } else {
         messageInput.classList.remove("input-disabled");
         messageInput.placeholder = "Type your scheduled message…";
       }
     }
 
+    // 5. Attachments Button State
+    if (addFileBtn) {
+      addFileBtn.disabled = !enableInputs;
+      if (!enableInputs) {
+        addFileBtn.classList.add("btn-disabled");
+      } else {
+        addFileBtn.classList.remove("btn-disabled");
+      }
+    }
+
+    // 6. Date & Time Inputs State
+    if (dateInput) {
+      dateInput.disabled = !enableInputs;
+      if (!enableInputs) {
+        dateInput.classList.add("input-disabled");
+      } else {
+        dateInput.classList.remove("input-disabled");
+      }
+    }
+    if (timeInput) {
+      timeInput.disabled = !enableInputs;
+      if (!enableInputs) {
+        timeInput.classList.add("input-disabled");
+      } else {
+        timeInput.classList.remove("input-disabled");
+      }
+    }
+
+    // 7. Preset Chips State
+    document.querySelectorAll(".preset-chips .chip").forEach(chip => {
+      chip.disabled = !enableInputs;
+      if (!enableInputs) {
+        chip.classList.add("chip-disabled");
+      } else {
+        chip.classList.remove("chip-disabled");
+      }
+    });
+
+    // 8. Submit Schedule Button State
     if (submitScheduleBtn) {
       submitScheduleBtn.disabled = !enableInputs;
       if (!enableInputs) {
