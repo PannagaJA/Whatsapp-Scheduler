@@ -18,22 +18,42 @@ android {
 
     signingConfigs {
         release {
-            storeFile file("app-release.jks")
-            storePassword "scheduler123"
-            keyAlias "whatsapp-scheduler"
-            keyPassword "scheduler123"
+            def ksPath = System.getenv("KEYSTORE_PATH")
+            def ksPass = System.getenv("KEYSTORE_PASSWORD")
+            def kAlias = System.getenv("KEY_ALIAS")
+            def kPass = System.getenv("KEY_PASSWORD")
+
+            if (ksPath && ksPass && kAlias && kPass && file(ksPath).exists()) {
+                storeFile file(ksPath)
+                storePassword ksPass
+                keyAlias kAlias
+                keyPassword kPass
+            }
         }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            if (System.getenv("KEYSTORE_PATH") && file(System.getenv("KEYSTORE_PATH")).exists()) {
+                signingConfig signingConfigs.release
+            }
         }
         debug {
             debuggable true
-            signingConfig signingConfigs.release
+        }
+    }
+
+    gradle.taskGraph.whenReady { taskGraph ->
+        if (taskGraph.hasTask(":app:assembleRelease") || taskGraph.hasTask("assembleRelease")) {
+            def ksPath = System.getenv("KEYSTORE_PATH")
+            def ksPass = System.getenv("KEYSTORE_PASSWORD")
+            def kAlias = System.getenv("KEY_ALIAS")
+            def kPass = System.getenv("KEY_PASSWORD")
+            if (!ksPath || !file(ksPath).exists() || !ksPass || !kAlias || !kPass) {
+                throw new GradleException("ERROR: assembleRelease requires valid signing environment variables (KEYSTORE_PATH, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD). Insecure fallbacks are strictly prohibited.")
+            }
         }
     }
 
