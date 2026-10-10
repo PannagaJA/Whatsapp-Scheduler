@@ -58,7 +58,7 @@ class UserWhatsAppSession {
         logger: pino({ level: "silent" }),
         auth: state,
         browser: Browsers.ubuntu("Chrome"),
-        syncFullHistory: true,
+        syncFullHistory: process.env.WA_SYNC_FULL_HISTORY === "true",
         generateHighQualityLinkPreview: true
       });
 
@@ -503,9 +503,46 @@ async function initAllActiveSessions() {
   }
 }
 
+// Cleanup session resources on user deletion
+async function closeAndCleanupUserSession(userId) {
+  if (!userId) return;
+  const session = userSessions.get(userId);
+  if (session) {
+    if (session.sock) {
+      try {
+        await session.sock.logout();
+      } catch (_) {
+        try { session.sock.end(new Error("User deleted")); } catch (_) {}
+      }
+    }
+    userSessions.delete(userId);
+  }
+
+  // Safely wipe session files on disk
+  const userSessionDir = path.join(SESSIONS_BASE_DIR, userId);
+  try {
+    if (fs.existsSync(userSessionDir)) {
+      fs.rmSync(userSessionDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error(`[WhatsApp Engine] Failed to wipe session dir for user ${userId}:`, err.message);
+  }
+
+  // Safely wipe user uploads on disk
+  const userUploadsDir = path.join(DB_DIR, "uploads", userId);
+  try {
+    if (fs.existsSync(userUploadsDir)) {
+      fs.rmSync(userUploadsDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error(`[WhatsApp Engine] Failed to wipe uploads dir for user ${userId}:`, err.message);
+  }
+}
+
 module.exports = {
   getOrCreateUserSession,
   initAllActiveSessions,
+  closeAndCleanupUserSession,
   getStatus: (userId) => getOrCreateUserSession(userId).getStatus(),
   requestPairingCode: (userId, phone) => getOrCreateUserSession(userId).requestPairingCode(phone),
   getProfilePicture: (userId, jid) => getOrCreateUserSession(userId).getProfilePicture(jid),

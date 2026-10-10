@@ -52,8 +52,8 @@ async function checkAndProcessSchedules() {
     for (const job of pendingJobs) {
       // Atomic claim to prevent double-execution in race conditions / multi-process
       const claimResult = await run(
-        `UPDATE schedules SET status = 'processing', attempts = attempts + 1 WHERE id = ? AND status IN ('scheduled', 'retrying')`,
-        [job.id]
+        `UPDATE schedules SET status = 'processing', attempts = attempts + 1, updated_at = ? WHERE id = ? AND status IN ('scheduled', 'retrying')`,
+        [Date.now(), job.id]
       );
       if (claimResult.changes === 0) {
         // Already claimed by another worker or updated
@@ -63,7 +63,7 @@ async function checkAndProcessSchedules() {
       const userId = job.user_id;
       if (!userId) {
         console.error(`[Scheduler] Job ${job.id} has no associated user_id. Marking failed.`);
-        await run(`UPDATE schedules SET status = 'failed', error = 'Missing owning user_id' WHERE id = ?`, [job.id]);
+        await run(`UPDATE schedules SET status = 'failed', error = 'Missing owning user_id', updated_at = ? WHERE id = ?`, [Date.now(), job.id]);
         continue;
       }
 
@@ -72,7 +72,7 @@ async function checkAndProcessSchedules() {
       if (statusObj.status !== "connected") {
         console.log(`[Scheduler] User ${userId} WhatsApp is not connected (${statusObj.status}). Postponing job ${job.id}...`);
         const retryAt = Date.now() + 60 * 1000;
-        await run(`UPDATE schedules SET status = 'retrying', scheduled_at = ?, error = 'WhatsApp not connected for user' WHERE id = ?`, [retryAt, job.id]);
+        await run(`UPDATE schedules SET status = 'retrying', scheduled_at = ?, error = 'WhatsApp not connected for user', updated_at = ? WHERE id = ?`, [retryAt, Date.now(), job.id]);
         continue;
       }
 
@@ -88,9 +88,9 @@ async function checkAndProcessSchedules() {
 
         await run(`
           UPDATE schedules 
-          SET status = 'sent', sent_at = ?, jid = coalesce(?, jid), error = NULL 
+          SET status = 'sent', sent_at = ?, updated_at = ?, jid = coalesce(?, jid), error = NULL 
           WHERE id = ?
-        `, [Date.now(), result?.jid || null, job.id]);
+        `, [Date.now(), Date.now(), result?.jid || null, job.id]);
         console.log(`[Scheduler] Job ${job.id} sent successfully for user ${userId} to ${result?.jid || job.recipient}!`);
 
         // Clean up temporary attachment files safely
@@ -106,17 +106,17 @@ async function checkAndProcessSchedules() {
         if (job.attempts + 1 >= maxAttempts) {
           await run(`
             UPDATE schedules 
-            SET status = 'failed', error = ? 
+            SET status = 'failed', error = ?, updated_at = ? 
             WHERE id = ?
-          `, [err.message || String(err), job.id]);
+          `, [err.message || String(err), Date.now(), job.id]);
         } else {
           // Retry in 2 minutes
           const retryAt = Date.now() + 2 * 60 * 1000;
           await run(`
             UPDATE schedules 
-            SET status = 'retrying', scheduled_at = ?, error = ? 
+            SET status = 'retrying', scheduled_at = ?, error = ?, updated_at = ? 
             WHERE id = ?
-          `, [retryAt, err.message || String(err), job.id]);
+          `, [retryAt, err.message || String(err), Date.now(), job.id]);
         }
       }
     }
@@ -127,18 +127,21 @@ async function checkAndProcessSchedules() {
   }
 }
 
-async function recoverStaleProcessingJobs() {
+async function recoverStaleProcessingJobs(staleThresholdMs = 5 * 60 * 1000) {
   try {
+    const staleBefore = Date.now() - staleThresholdMs;
     const res = await run(`
       UPDATE schedules 
-      SET status = 'retrying', scheduled_at = ?, error = 'Recovered after server restart' 
-      WHERE status = 'processing'
-    `, [Date.now()]);
+      SET status = 'retrying', scheduled_at = ?, error = 'Recovered after server restart (stale processing job)', updated_at = ? 
+      WHERE status = 'processing' AND (updated_at IS NULL OR updated_at < ?)
+    `, [Date.now(), Date.now(), staleBefore]);
     if (res.changes > 0) {
       console.log(`[Scheduler] Recovered ${res.changes} orphaned processing job(s) on boot.`);
     }
+    return res.changes;
   } catch (err) {
     console.error("[Scheduler] Error recovering stale jobs:", err.message);
+    return 0;
   }
 }
 

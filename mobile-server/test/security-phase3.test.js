@@ -261,6 +261,9 @@ async function runSecurityPhase3Tests() {
 
     assert.strictEqual(triggered429, true, "Rate limiter must return HTTP 429 when max attempts exceeded");
     assert.ok(retryAfterHeader, "429 response must contain Retry-After header");
+
+    const { loginLimiterInstance } = require("../rateLimiter");
+    if (loginLimiterInstance) loginLimiterInstance.reset();
   });
 
   // --- D. SEC-008: Docker Build-Context Secret Exclusion ---
