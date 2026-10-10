@@ -96,6 +96,7 @@ async function checkAndProcessSchedules() {
         // Clean up temporary attachment files safely
         for (const file of attachments) {
           if (file.path) {
+            safeDeleteAttachment(file.path, path.join(UPLOADS_DIR, userId));
             safeDeleteAttachment(file.path, UPLOADS_DIR);
           }
         }

@@ -521,10 +521,12 @@ async function runSecurityPhase2Tests() {
 }
 
 if (require.main === module) {
-  runSecurityPhase2Tests().catch((err) => {
-    console.error("Test Suite execution failed:", err);
-    process.exit(1);
-  });
+  runSecurityPhase2Tests()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Test Suite execution failed:", err);
+      process.exit(1);
+    });
 }
 
 module.exports = { runSecurityPhase2Tests };
