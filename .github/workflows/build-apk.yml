@@ -155,7 +155,29 @@ jobs:
         run: |
           KEYSTORE_DIR="$(mktemp -d /tmp/signing_keystore_XXXXXX)"
           KEYSTORE_FILE="$KEYSTORE_DIR/release.jks"
-          printf '%s' "$KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > "$KEYSTORE_FILE"
+          NORMALIZED_KEYSTORE_B64="$KEYSTORE_B64"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64#data:application/octet-stream;base64,}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64#data:application/x-pkcs12;base64,}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64#\"}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64%\"}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64#\'}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64%\'}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64//\\n/}"
+          NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64//\\r/}"
+          NORMALIZED_KEYSTORE_B64="$(printf '%s' "$NORMALIZED_KEYSTORE_B64" | tr -d '[:space:]' | tr '_-' '/+')"
+          case $(( ${#NORMALIZED_KEYSTORE_B64} % 4 )) in
+            2) NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64}==" ;;
+            3) NORMALIZED_KEYSTORE_B64="${NORMALIZED_KEYSTORE_B64}=" ;;
+            1)
+              echo "::error::RELEASE_KEYSTORE_BASE64 has invalid Base64 length after normalization."
+              exit 1
+              ;;
+          esac
+          printf '%s' "$NORMALIZED_KEYSTORE_B64" | base64 --decode > "$KEYSTORE_FILE"
+          if [ ! -s "$KEYSTORE_FILE" ]; then
+            echo "::error::Decoded keystore file is empty. Check RELEASE_KEYSTORE_BASE64 secret formatting."
+            exit 1
+          fi
           chmod 600 "$KEYSTORE_FILE"
           echo "keystore_path=$KEYSTORE_FILE" >> "$GITHUB_OUTPUT"
           echo "keystore_dir=$KEYSTORE_DIR" >> "$GITHUB_OUTPUT"
