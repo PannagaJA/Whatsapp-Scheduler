@@ -93,7 +93,7 @@ function validateAndProcessUploads(req, res, next) {
 const shareCache = new Map();
 
 // Strict CORS Middleware (SEC-009)
-const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000";
+const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || process.env.RENDER_EXTERNAL_URL || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000";
 const allowedOriginsSet = new Set(rawAllowedOrigins.split(",").map(o => o.trim().toLowerCase()).filter(Boolean));
 
 app.use((req, res, next) => {
@@ -600,9 +600,9 @@ app.get("*", (req, res) => {
 // Production Configuration Gate (Requirement C)
 function validateProductionConfig() {
   if (process.env.NODE_ENV === "production") {
-    const raw = process.env.ALLOWED_ORIGINS || "";
+    const raw = process.env.ALLOWED_ORIGINS || process.env.RENDER_EXTERNAL_URL || "";
     if (!raw.trim()) {
-      throw new Error("PRODUCTION CONFIG ERROR: ALLOWED_ORIGINS must be set in production");
+      throw new Error("PRODUCTION CONFIG ERROR: ALLOWED_ORIGINS (or RENDER_EXTERNAL_URL) must be set in production");
     }
     const origins = raw.split(",").map(o => o.trim().toLowerCase());
     const hasLocalhost = origins.some(o => o.includes("localhost") || o.includes("127.0.0.1"));
