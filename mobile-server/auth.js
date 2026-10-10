@@ -320,6 +320,37 @@ async function authenticateUser(username, password) {
   };
 }
 
+async function bootstrapAdminFromEnv() {
+  const adminUser = (process.env.ADMIN_USERNAME || "").trim().toLowerCase();
+  const adminPass = (process.env.ADMIN_PASSWORD || "").trim();
+
+  if (!adminUser || !adminPass) return null;
+
+  try {
+    const existing = await get("SELECT id, role FROM users WHERE lower(username) = lower(?)", [adminUser]);
+    if (existing) {
+      if (existing.role !== "admin") {
+        await run("UPDATE users SET role = 'admin' WHERE id = ?", [existing.id]);
+        console.log(`[Auth] Promoted existing user "${adminUser}" to administrator via environment configuration.`);
+      }
+      return existing;
+    }
+
+    const id = crypto.randomUUID();
+    const passwordHash = await hashPasswordAsync(adminPass);
+    const now = Date.now();
+    await run(
+      "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, 'admin', ?)",
+      [id, adminUser, passwordHash, now]
+    );
+    console.log(`[Auth] Bootstrapped dedicated administrator account "${adminUser}" from environment configuration.`);
+    return { id, username: adminUser, role: "admin" };
+  } catch (err) {
+    console.error("[Auth] Failed to bootstrap admin from environment:", err.message);
+    return null;
+  }
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
@@ -336,5 +367,6 @@ module.exports = {
   createUserByAdmin,
   listUsers,
   deleteUserAccount,
-  authenticateUser
+  authenticateUser,
+  bootstrapAdminFromEnv
 };

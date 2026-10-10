@@ -14,7 +14,8 @@ const {
   listUsers,
   deleteUserAccount,
   authenticateUser,
-  deleteSession
+  deleteSession,
+  bootstrapAdminFromEnv
 } = require("./auth");
 const {
   initAllActiveSessions,
@@ -622,7 +623,13 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  initDb().then(() => {
+  initDb().then(async () => {
+    try {
+      await bootstrapAdminFromEnv();
+    } catch (err) {
+      console.error("[Startup] Admin bootstrap warning:", err.message);
+    }
+
     app.listen(PORT, async () => {
       console.log(`\n======================================================`);
       console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
