@@ -81,10 +81,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const authErrorMsg = document.getElementById("authErrorMsg");
   const authSubmitBtn = document.getElementById("authSubmitBtn");
   const authSubmitText = document.getElementById("authSubmitText");
+  const authToggleModeLink = document.getElementById("authToggleModeLink");
+  const currentUsernameText = document.getElementById("currentUsernameText");
+  const currentUserRoleText = document.getElementById("currentUserRoleText");
+  const btnSignOutApp = document.getElementById("btnSignOutApp");
 
   // State
   let authToken = localStorage.getItem("wa_auth_token") || "";
+  let currentUser = null;
   let isSetupMode = false;
+  let isInitialSetup = false;
+  let allowRegistration = true;
   let selectedFiles = [];
   let stagedFiles = [];
   let allContacts = [];
@@ -129,22 +136,61 @@ document.addEventListener("DOMContentLoaded", () => {
     if (authErrorMsg) authErrorMsg.style.display = "none";
   }
 
+  function updateCurrentUserDisplay() {
+    if (currentUsernameText && currentUser) {
+      currentUsernameText.textContent = currentUser.username || "User";
+    }
+    if (currentUserRoleText && currentUser) {
+      currentUserRoleText.textContent = (currentUser.role === "admin") ? "Administrator 👑" : "User";
+    }
+  }
+
+  function updateAuthModalUI() {
+    if (isInitialSetup) {
+      if (authModalTitle) authModalTitle.textContent = "Initial Setup — Create Admin";
+      if (authModalDesc) authModalDesc.textContent = "Welcome! Create your administrator username and password to secure your scheduler:";
+      if (authSubmitText) authSubmitText.textContent = "Create Admin & Sign In";
+      if (authToggleModeLink) authToggleModeLink.style.display = "none";
+    } else if (isSetupMode) {
+      if (authModalTitle) authModalTitle.textContent = "Create New Account";
+      if (authModalDesc) authModalDesc.textContent = "Register your personal account to connect your WhatsApp:";
+      if (authSubmitText) authSubmitText.textContent = "Register & Sign In";
+      if (authToggleModeLink) {
+        authToggleModeLink.style.display = "inline-block";
+        authToggleModeLink.textContent = "Already have an account? Sign In";
+      }
+    } else {
+      if (authModalTitle) authModalTitle.textContent = "Sign In";
+      if (authModalDesc) authModalDesc.textContent = "Please sign in with your application credentials to continue:";
+      if (authSubmitText) authSubmitText.textContent = "Sign In";
+      if (authToggleModeLink) {
+        authToggleModeLink.style.display = allowRegistration ? "inline-block" : "none";
+        authToggleModeLink.textContent = "Don't have an account? Register";
+      }
+    }
+  }
+
   async function checkAuthSetup() {
     try {
       const res = await fetch("/api/auth/setup-status");
       const data = await res.json();
-      if (data?.setupRequired) {
+      isInitialSetup = Boolean(data?.setupRequired);
+      allowRegistration = Boolean(data?.allowRegistration);
+      if (isInitialSetup) {
         isSetupMode = true;
-        if (authModalTitle) authModalTitle.textContent = "Initial Setup — Create Account";
-        if (authModalDesc) authModalDesc.textContent = "Welcome! Create your administrator username and password to secure your scheduler:";
-        if (authSubmitText) authSubmitText.textContent = "Create Account & Sign In";
-      } else {
-        isSetupMode = false;
-        if (authModalTitle) authModalTitle.textContent = "Sign In";
-        if (authModalDesc) authModalDesc.textContent = "Please sign in with your application credentials to continue:";
-        if (authSubmitText) authSubmitText.textContent = "Sign In";
       }
+      updateAuthModalUI();
     } catch (_) {}
+  }
+
+  if (authToggleModeLink) {
+    authToggleModeLink.onclick = (e) => {
+      e.preventDefault();
+      if (isInitialSetup) return;
+      isSetupMode = !isSetupMode;
+      if (authErrorMsg) authErrorMsg.style.display = "none";
+      updateAuthModalUI();
+    };
   }
 
   if (authForm) {
@@ -167,9 +213,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const data = await res.json();
         if (data.success && data.token) {
           authToken = data.token;
+          currentUser = data.user || { username, role: "user" };
           localStorage.setItem("wa_auth_token", authToken);
           hideAuthModal();
-          showToast("✓ Signed in successfully!");
+          updateCurrentUserDisplay();
+          showToast(`✓ Welcome, ${escapeHtml(currentUser.username)}!`);
           checkStatus();
           loadContacts();
           loadSchedules();
@@ -190,6 +238,21 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  if (btnSignOutApp) {
+    btnSignOutApp.onclick = async () => {
+      if (!confirm("Are you sure you want to sign out of this application account?")) return;
+      try {
+        await authFetch("/api/auth/logout", { method: "POST" });
+      } catch (_) {}
+      authToken = "";
+      currentUser = null;
+      localStorage.removeItem("wa_auth_token");
+      localStorage.removeItem("wa_phonebook_synced");
+      showToast("Signed out of application");
+      showAuthModal();
+    };
+  }
+
   // Initial Auth Verification
   async function verifyInitialAuth() {
     if (!authToken) {
@@ -200,10 +263,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch("/api/auth/me", {
         headers: { "Authorization": `Bearer ${authToken}` }
       });
-      if (!res.ok) {
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.user) {
+          currentUser = data.user;
+          updateCurrentUserDisplay();
+        }
+      } else {
         showAuthModal();
       }
-    } catch (_) {}
+    } catch (_) {
+      showAuthModal();
+    }
   }
   verifyInitialAuth();
 

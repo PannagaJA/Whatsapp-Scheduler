@@ -246,6 +246,19 @@
         </div>
 
         <div class="device-card" style="margin-top: 16px;">
+          <h2>User Account</h2>
+          <p class="card-desc">Signed in account details and multi-user session controls.</p>
+          <div style="background: var(--bg-input); border-radius: var(--radius-md); padding: 14px; margin-bottom: 14px;">
+            <div id="currentUserLabel" style="font-weight: 600; color: var(--text-primary); font-size: 14px;">Signed in as: <span id="currentUsernameText" style="color: var(--accent);">Loading…</span></div>
+            <div id="currentUserRole" style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Role: <span id="currentUserRoleText">User</span></div>
+          </div>
+          <button type="button" class="btn-secondary" id="btnSignOutApp" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+            <span>Sign Out of Application</span>
+          </button>
+        </div>
+
+        <div class="device-card" style="margin-top: 16px;">
           <h2>App Updates & APK</h2>
           <p class="card-desc">Download and install the latest Android APK update directly.</p>
           <div class="update-card-body">
@@ -380,6 +393,9 @@
           <button type="submit" class="btn-primary" id="authSubmitBtn" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px;">
             <span id="authSubmitText">Sign In</span>
           </button>
+          <div style="margin-top: 14px; text-align: center; font-size: 13px;">
+            <a href="#" id="authToggleModeLink" style="color: var(--accent); text-decoration: none; font-weight: 500;">Don't have an account? Register</a>
+          </div>
         </form>
       </div>
     </div>
@@ -388,6 +404,6 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <script src="/app.js?v=2.1"></script>
+  <script src="/app.js?v=2.2"></script>
 </body>
 </html>
