@@ -209,7 +209,8 @@ jobs:
         run: |
           mkdir -p build-output
           cp android/app/build/outputs/apk/release/app-release.apk "build-output/WhatsApp-Scheduler-${RELEASE_TAG}.apk"
-          ls -lh "build-output/WhatsApp-Scheduler-${RELEASE_TAG}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "build-output/WhatsApp-Scheduler.apk"
+          ls -lh build-output/
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4

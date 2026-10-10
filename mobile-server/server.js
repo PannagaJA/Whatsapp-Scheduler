@@ -210,7 +210,7 @@ app.get("/api/version", async (req, res) => {
       success: true,
       version: cachedRelease.version,
       name: "WhatsApp Scheduler",
-      downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${cachedRelease.version}/WhatsApp-Scheduler.apk`
+      downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${cachedRelease.version}/WhatsApp-Scheduler-${cachedRelease.version}.apk`
     });
   }
 
@@ -229,7 +229,7 @@ app.get("/api/version", async (req, res) => {
           success: true,
           version: ver,
           name: "WhatsApp Scheduler",
-          downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${ver}/WhatsApp-Scheduler.apk`
+          downloadUrl: `https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/${ver}/WhatsApp-Scheduler-${ver}.apk`
         });
       }
     }
@@ -241,7 +241,7 @@ app.get("/api/version", async (req, res) => {
     success: true,
     version: cachedRelease.version || "1.0.0",
     name: "WhatsApp Scheduler",
-    downloadUrl: "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/latest/download/WhatsApp-Scheduler.apk"
+    downloadUrl: "https://github.com/PannagaJA/Whatsapp-Scheduler/releases/download/v1.0.0/WhatsApp-Scheduler-v1.0.0.apk"
   });
 });
 
