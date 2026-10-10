@@ -41,6 +41,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -200,7 +201,12 @@ public class MainActivity extends AppCompatActivity {
         } else if (requestCode == INSTALL_PERMISSION_REQ) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (getPackageManager().canRequestPackageInstalls() && pendingInstallApkPath != null) {
-                    triggerPackageInstaller(new File(pendingInstallApkPath));
+                    File apkToInstall = new File(pendingInstallApkPath);
+                    pendingInstallApkPath = null;
+                    triggerPackageInstaller(apkToInstall);
+                } else {
+                    pendingInstallApkPath = null;
+                    reportUpdateError("Install permission was not granted.");
                 }
             }
         }
@@ -288,7 +294,7 @@ public class MainActivity extends AppCompatActivity {
         public void downloadAndInstallUpdate(final String downloadUrl) {
             // SEC-002: Strict URL and Protocol Whitelist Check
             if (downloadUrl == null || !downloadUrl.startsWith("https://")) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Insecure download URL.", Toast.LENGTH_LONG).show());
+                reportUpdateError("Update error: Insecure download URL.");
                 return;
             }
 
@@ -296,11 +302,11 @@ public class MainActivity extends AppCompatActivity {
                 Uri parsedUri = Uri.parse(downloadUrl);
                 String host = parsedUri.getHost();
                 if (host == null || (!host.equalsIgnoreCase("github.com") && !host.endsWith(".githubusercontent.com"))) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Untrusted download source.", Toast.LENGTH_LONG).show());
+                    reportUpdateError("Update error: Untrusted download source.");
                     return;
                 }
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: Invalid download URL.", Toast.LENGTH_LONG).show());
+                reportUpdateError("Update error: Invalid download URL.");
                 return;
             }
 
@@ -346,8 +352,7 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     if (responseCode != HttpURLConnection.HTTP_OK) {
-                        final String errMsg = "Download failed: HTTP " + responseCode;
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, errMsg, Toast.LENGTH_LONG).show());
+                        reportUpdateError("Download failed: HTTP " + responseCode);
                         return;
                     }
 
@@ -356,19 +361,53 @@ public class MainActivity extends AppCompatActivity {
                     apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
                     if (apkFile.exists()) apkFile.delete();
 
+                    final long fileLength = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+                            ? conn.getContentLengthLong()
+                            : conn.getContentLength();
+
                     InputStream inputStream = conn.getInputStream();
                     FileOutputStream outputStream = new FileOutputStream(apkFile);
 
                     byte[] buffer = new byte[8192];
                     int bytesRead;
+                    long totalBytesRead = 0;
+                    long lastUpdateTime = 0;
+
                     while ((bytesRead = inputStream.read(buffer)) != -1) {
                         outputStream.write(buffer, 0, bytesRead);
+                        totalBytesRead += bytesRead;
+
+                        long now = System.currentTimeMillis();
+                        if (now - lastUpdateTime > 80) {
+                            lastUpdateTime = now;
+                            final int progressPercent = (fileLength > 0) ? (int) ((totalBytesRead * 100) / fileLength) : -1;
+                            final long curBytes = totalBytesRead;
+                            final long totalBytes = fileLength;
+                            runOnUiThread(() -> {
+                                if (webView != null) {
+                                    String js = String.format(Locale.US,
+                                        "if (typeof window.onUpdateDownloadProgress === 'function') window.onUpdateDownloadProgress(%d, %d, %d);",
+                                        progressPercent, curBytes, totalBytes);
+                                    webView.evaluateJavascript(js, null);
+                                }
+                            });
+                        }
                     }
 
                     outputStream.flush();
                     outputStream.close();
                     inputStream.close();
                     conn.disconnect();
+
+                    final long finalBytes = totalBytesRead;
+                    runOnUiThread(() -> {
+                        if (webView != null) {
+                            String js = String.format(Locale.US,
+                                "if (typeof window.onUpdateDownloadProgress === 'function') window.onUpdateDownloadProgress(100, %d, %d);",
+                                finalBytes, finalBytes);
+                            webView.evaluateJavascript(js, null);
+                        }
+                    });
 
                     // SEC-002: Programmatic Package Identity & Signature Continuity Verification
                     final File verifiedApk = apkFile;
@@ -382,7 +421,7 @@ public class MainActivity extends AppCompatActivity {
                         apkFile.delete();
                     }
                     final String errText = e.getMessage() != null ? e.getMessage() : "Security verification failed";
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Update error: " + errText, Toast.LENGTH_LONG).show());
+                    reportUpdateError("Update error: " + errText);
                 }
             });
         }
@@ -438,7 +477,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void triggerPackageInstaller(File apkFile) {
-        if (apkFile == null || !apkFile.exists()) return;
+        if (apkFile == null || !apkFile.exists()) {
+            reportUpdateError("Update error: Downloaded update archive not found.");
+            return;
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (!getPackageManager().canRequestPackageInstalls()) {
@@ -462,9 +504,25 @@ public class MainActivity extends AppCompatActivity {
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(installIntent);
+
+            runOnUiThread(() -> {
+                if (webView != null) {
+                    webView.evaluateJavascript("if (typeof window.onUpdateDownloadComplete === 'function') window.onUpdateDownloadComplete(true);", null);
+                }
+            });
         } catch (Exception e) {
-            Toast.makeText(this, "Failed to launch installer: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            reportUpdateError("Failed to launch installer: " + e.getMessage());
         }
+    }
+
+    private void reportUpdateError(String errMsg) {
+        final String safeMsg = (errMsg != null) ? errMsg : "Security verification failed";
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript("if (typeof window.onUpdateDownloadError === 'function') window.onUpdateDownloadError('" + safeMsg.replace("'", "\\'") + "');", null);
+            }
+            Toast.makeText(MainActivity.this, safeMsg, Toast.LENGTH_LONG).show();
+        });
     }
 
     @Override

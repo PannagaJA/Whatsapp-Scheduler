@@ -131,6 +131,15 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "pwa")));
 
+// Public Health Check Endpoints (for UptimeRobot, Render health check, and external monitoring)
+app.get(["/health", "/api/health"], (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: Math.floor(process.uptime()),
+    timestamp: Date.now()
+  });
+});
+
 // --- Application Authentication Routes (Protected by Auth Limiter) ---
 app.get("/api/auth/setup-status", async (req, res) => {
   try {

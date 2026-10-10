@@ -1345,6 +1345,46 @@ textarea:disabled {
   transform: scale(0.96);
 }
 
+.btn-update-now:disabled {
+  opacity: 0.75;
+  cursor: wait;
+  pointer-events: none;
+}
+
+/* === In-App Update Progress === */
+.update-progress-wrap {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.update-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.update-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #25D366, #00A884);
+  border-radius: 4px;
+  transition: width 0.15s ease-out;
+  box-shadow: 0 0 8px rgba(37, 211, 102, 0.5);
+}
+
+.update-progress-labels {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #25D366;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 
 /* === Queue / Scheduled Messages Cards === */
 .queue-head {
