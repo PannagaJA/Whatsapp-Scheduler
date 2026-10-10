@@ -12,29 +12,37 @@ if (!fs.existsSync(DB_DIR)) {
 const DB_PATH = path.join(DB_DIR, 'scheduler.db');
 const db = new sqlite3.Database(DB_PATH);
 
-// Enable WAL mode for high concurrency and fast writes
-db.serialize(() => {
-  db.run('PRAGMA journal_mode = WAL');
-  db.run('PRAGMA synchronous = NORMAL');
+// Enable WAL mode and busy timeout for high concurrency and resilient writes
+let dbInitPromise = null;
 
-  // Schedules table (user_id scoped)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS schedules (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      recipient TEXT NOT NULL,
-      jid TEXT,
-      text TEXT,
-      attachments TEXT,
-      scheduled_at INTEGER NOT NULL,
-      status TEXT DEFAULT 'scheduled',
-      attempts INTEGER DEFAULT 0,
-      error TEXT,
-      created_at INTEGER NOT NULL,
-      sent_at INTEGER
-    )
-  `);
-  try { db.run("ALTER TABLE schedules ADD COLUMN user_id TEXT", () => {}); } catch (_) {}
+function initDb() {
+  if (dbInitPromise) return dbInitPromise;
+  dbInitPromise = new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run('PRAGMA journal_mode = WAL');
+      db.run('PRAGMA synchronous = NORMAL');
+      db.run('PRAGMA busy_timeout = 5000');
+
+      // Schedules table (user_id scoped)
+      db.run(`
+        CREATE TABLE IF NOT EXISTS schedules (
+          id TEXT PRIMARY KEY,
+          user_id TEXT,
+          recipient TEXT NOT NULL,
+          jid TEXT,
+          text TEXT,
+          attachments TEXT,
+          scheduled_at INTEGER NOT NULL,
+          status TEXT DEFAULT 'scheduled',
+          attempts INTEGER DEFAULT 0,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          sent_at INTEGER,
+          updated_at INTEGER
+        )
+      `);
+      try { db.run("ALTER TABLE schedules ADD COLUMN user_id TEXT", () => {}); } catch (_) {}
+      try { db.run("ALTER TABLE schedules ADD COLUMN updated_at INTEGER", () => {}); } catch (_) {}
 
   // Contacts cache table (user_id scoped)
   db.run(`
@@ -148,7 +156,18 @@ db.serialize(() => {
 
   // Clean up any internal @lid entries from contacts
   db.run(`DELETE FROM contacts WHERE jid LIKE '%@lid' OR (jid NOT LIKE '%@s.whatsapp.net' AND jid NOT LIKE '%@g.us')`, () => {});
+
+  db.run("SELECT 1", (err) => {
+    if (err) reject(err);
+    else resolve();
+  });
 });
+  });
+  return dbInitPromise;
+}
+
+// Auto-start initialization on load
+initDb().catch((err) => console.error("[DB] Initialization error:", err));
 
 // Promisified DB Helpers
 function run(sql, params = []) {
@@ -253,6 +272,7 @@ async function migrateLegacyData(adminUserId) {
 
 module.exports = {
   db,
+  initDb,
   run,
   get,
   all,
