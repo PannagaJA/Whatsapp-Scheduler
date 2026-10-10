@@ -15,13 +15,26 @@ async function hashPasswordAsync(password) {
 }
 
 async function verifyPasswordAsync(password, storedHash) {
-  if (!password || !storedHash || !storedHash.includes(":")) {
+  if (!password || !storedHash || typeof storedHash !== "string" || !storedHash.includes(":")) {
     return false;
   }
   const [salt, key] = storedHash.split(":");
+  if (!salt || !key) {
+    return false;
+  }
   const keyBuffer = Buffer.from(key, "hex");
-  const derivedKey = await scryptAsync(password, salt, 64);
-  return crypto.timingSafeEqual(keyBuffer, derivedKey);
+  if (keyBuffer.length !== 64) {
+    return false;
+  }
+  try {
+    const derivedKey = await scryptAsync(password, salt, 64);
+    if (!derivedKey || derivedKey.length !== 64) {
+      return false;
+    }
+    return crypto.timingSafeEqual(keyBuffer, derivedKey);
+  } catch (_) {
+    return false;
+  }
 }
 
 // Synchronous Fallbacks for backward compatibility
@@ -35,13 +48,26 @@ function hashPassword(password) {
 }
 
 function verifyPassword(password, storedHash) {
-  if (!password || !storedHash || !storedHash.includes(":")) {
+  if (!password || !storedHash || typeof storedHash !== "string" || !storedHash.includes(":")) {
     return false;
   }
   const [salt, key] = storedHash.split(":");
+  if (!salt || !key) {
+    return false;
+  }
   const keyBuffer = Buffer.from(key, "hex");
-  const derivedKey = crypto.scryptSync(password, salt, 64);
-  return crypto.timingSafeEqual(keyBuffer, derivedKey);
+  if (keyBuffer.length !== 64) {
+    return false;
+  }
+  try {
+    const derivedKey = crypto.scryptSync(password, salt, 64);
+    if (!derivedKey || derivedKey.length !== 64) {
+      return false;
+    }
+    return crypto.timingSafeEqual(keyBuffer, derivedKey);
+  } catch (_) {
+    return false;
+  }
 }
 
 // Session Token Management
@@ -238,6 +264,19 @@ async function listUsers() {
 
 async function deleteUserAccount(userId) {
   if (!userId) throw new Error("User ID is required");
+
+  const targetUser = await get("SELECT id, role FROM users WHERE id = ?", [userId]);
+  if (!targetUser) {
+    throw new Error("User not found");
+  }
+
+  if (targetUser.role === "admin") {
+    const adminCountRow = await get("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
+    const adminCount = adminCountRow ? adminCountRow.count : 0;
+    if (adminCount <= 1) {
+      throw new Error("Cannot delete the last administrator account");
+    }
+  }
 
   // Close WhatsApp session & wipe session files/attachments safely
   try {

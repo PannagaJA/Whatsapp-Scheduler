@@ -221,6 +221,16 @@ app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =
     if (targetId === req.user.id) {
       return res.status(400).json({ success: false, error: "Cannot delete your own administrator account" });
     }
+    const targetUser = await get("SELECT id, role FROM users WHERE id = ?", [targetId]);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    if (targetUser.role === "admin") {
+      const adminCountRow = await get("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
+      if ((adminCountRow?.count || 0) <= 1) {
+        return res.status(400).json({ success: false, error: "Cannot delete the last administrator account" });
+      }
+    }
     await logoutSession(targetId);
     await deleteUserAccount(targetId);
     const userUploadDir = path.join(UPLOADS_DIR, targetId);
@@ -229,7 +239,8 @@ app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =
     }
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const status = err.message.includes("last administrator") ? 400 : 500;
+    res.status(status).json({ success: false, error: err.message });
   }
 });
 
@@ -342,7 +353,7 @@ app.get("/api/status", requireAuth, async (req, res) => {
 // API: Dedicated QR Code Endpoint
 app.get("/api/qr", requireAuth, async (req, res) => {
   try {
-    const status = await getStatus(req.user.id);
+    const status = await getStatus(req.user.id, { forceInit: true });
     res.json({ 
       success: true, 
       qr: status.qr || null, 
