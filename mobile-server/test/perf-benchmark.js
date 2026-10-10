@@ -277,6 +277,92 @@ async function runPerformanceBenchmarks() {
     console.log(`   ✓ Baseline Heap: ${results.memoryUsage.baselineHeapUsedMb}MB -> With 25 Sessions: ${results.memoryUsage.afterHeapUsedMb}MB`);
     console.log(`   ✓ Heap Delta: +${heapDiffMb}MB (~${heapPerSessionKb}KB per session) | RSS Delta: +${rssDiffMb}MB\n`);
 
+    // -------------------------------------------------------------
+    // BENCHMARK 6: Realistic Multi-User Concurrent Workload (No Real WA Messages)
+    // -------------------------------------------------------------
+    console.log("📊 6. Measuring Realistic Multi-User Concurrency (5 concurrent users doing CRUD lifecycle)...");
+    const concurrentUsers = [];
+    for (let i = 0; i < 5; i++) {
+      const u = `real_user_${Date.now().toString(36)}_${i}`;
+      const reg = await registerUser(u, password);
+      concurrentUsers.push({ id: reg.user.id, username: u, token: reg.token });
+    }
+
+    const concurrentOpsStart = Date.now();
+    const concurrentUserPromises = concurrentUsers.map(async (u) => {
+      const userDurations = [];
+      // 1. Fetch own status
+      const s1 = Date.now();
+      const statusRes = await makeRequest(BASE_URL, "/api/status", {
+        headers: { Authorization: `Bearer ${u.token}` }
+      });
+      userDurations.push(Date.now() - s1);
+
+      // 2. Schedule 2 distinct messages
+      const s2 = Date.now();
+      const sched1 = await makeRequest(BASE_URL, "/api/schedules", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${u.token}` },
+        body: { recipient: "919000000001", text: "Bench 1", scheduledAt: Date.now() + 60000 }
+      });
+      userDurations.push(Date.now() - s2);
+
+      const s3 = Date.now();
+      const sched2 = await makeRequest(BASE_URL, "/api/schedules", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${u.token}` },
+        body: { recipient: "919000000002", text: "Bench 2", scheduledAt: Date.now() + 120000 }
+      });
+      userDurations.push(Date.now() - s3);
+
+      // 3. Query schedules list (verify only own messages returned)
+      const s4 = Date.now();
+      const listRes = await makeRequest(BASE_URL, "/api/schedules", {
+        headers: { Authorization: `Bearer ${u.token}` }
+      });
+      userDurations.push(Date.now() - s4);
+
+      // 4. Delete one scheduled message
+      const s5 = Date.now();
+      if (sched1.body && sched1.body.schedule && sched1.body.schedule.id) {
+        await makeRequest(BASE_URL, `/api/schedules/${sched1.body.schedule.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${u.token}` }
+        });
+      }
+      userDurations.push(Date.now() - s5);
+
+      return {
+        userId: u.id,
+        allSuccess: statusRes.status === 200 && sched1.status === 200 && sched2.status === 200 && listRes.status === 200,
+        durations: userDurations
+      };
+    });
+
+    const concurrentResults = await Promise.all(concurrentUserPromises);
+    const concurrentOpsDuration = Date.now() - concurrentOpsStart;
+    const allOpDurations = concurrentResults.flatMap((r) => r.durations);
+
+    results.multiUserRealisticConcurrency = {
+      concurrentUsers: 5,
+      totalOperations: allOpDurations.length,
+      allUsersSucceeded: concurrentResults.every((r) => r.allSuccess),
+      totalDurationMs: concurrentOpsDuration,
+      minOpMs: Math.min(...allOpDurations),
+      meanOpMs: Math.round(allOpDurations.reduce((a, b) => a + b, 0) / allOpDurations.length),
+      p95OpMs: calculatePercentile(allOpDurations, 95),
+      maxOpMs: Math.max(...allOpDurations),
+      effectiveOpsPerSecond: Math.round(allOpDurations.length / (concurrentOpsDuration / 1000))
+    };
+
+    console.log(`   ✓ 5 Users completed concurrent lifecycle (${results.multiUserRealisticConcurrency.totalOperations} operations) in ${concurrentOpsDuration}ms`);
+    console.log(`   ✓ Mean Operation Latency: ${results.multiUserRealisticConcurrency.meanOpMs}ms | P95: ${results.multiUserRealisticConcurrency.p95OpMs}ms | Ops/sec: ${results.multiUserRealisticConcurrency.effectiveOpsPerSecond}\n`);
+
+    // Clean up realistic test users
+    for (const u of concurrentUsers) {
+      await deleteUserAccount(u.id);
+    }
+
     // Clean up instantiated sessions
     for (const uid of instantiatedUsers) {
       await engine.closeAndCleanupUserSession(uid);
@@ -284,6 +370,22 @@ async function runPerformanceBenchmarks() {
     for (const u of testUsers) {
       await deleteUserAccount(u.id);
     }
+
+    // -------------------------------------------------------------
+    // AUDIT & BOTTLENECK ANALYSIS METADATA
+    // -------------------------------------------------------------
+    results.auditDisclaimers = {
+      mockedOperations: [
+        "Benchmark 3 mocks sendMessage with a 5ms delay. It reflects local SQLite queue throughput, NOT real WhatsApp delivery.",
+        "Real WhatsApp Web delivery requires Signal protocol double-ratchet encryption, Baileys WebSocket protocol handshake, and WhatsApp server ACK (~300ms - 2000ms per message).",
+        "Real WhatsApp anti-spam rate limiting restricts safe sending to 15-30 messages per minute per phone number. Sending at the benchmark's 9,000+ msg/min rate in production would immediately result in an automated WhatsApp account ban."
+      ],
+      memoryFootprintCaveat: [
+        "Benchmark 5 measures idle in-memory session wrappers (~6KB heap delta).",
+        "A real connected Baileys session maintains active WebSocket TLS connections, cryptography keys, and contact caches consuming 5MB - 15MB of RAM per active user.",
+        "Free-tier cloud hosting (e.g. Render 512MB RAM) will experience Out-Of-Memory (OOM) crashes if more than 25-35 concurrent active WhatsApp connections are maintained without swap or process clustering."
+      ]
+    };
 
     // -------------------------------------------------------------
     // SUMMARY

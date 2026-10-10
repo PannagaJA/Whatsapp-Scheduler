@@ -27,14 +27,30 @@ class UserWhatsAppSession {
     this.userProfile = null;
     this.isSyncing = false;
     this.syncTimeout = null;
+    this.reconnectTimer = null;
+    this.isExplicitlyLoggedOut = false;
+    this.isDestroyed = false;
+    this._isInitializing = false;
     this.authDir = path.join(SESSIONS_BASE_DIR, userId, "auth_info_baileys");
+  }
 
+  ensureAuthDir() {
+    if (this.isDestroyed) return false;
     if (!fs.existsSync(this.authDir)) {
       fs.mkdirSync(this.authDir, { recursive: true });
+    }
+    return true;
+  }
+
+  clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
   markSyncing(duration = 5000) {
+    if (this.isDestroyed || this.isExplicitlyLoggedOut) return;
     this.isSyncing = true;
     if (this.syncTimeout) clearTimeout(this.syncTimeout);
     this.syncTimeout = setTimeout(() => {
@@ -42,12 +58,28 @@ class UserWhatsAppSession {
     }, duration);
   }
 
-  async init() {
+  async init(force = false) {
+    if (this.isDestroyed) {
+      return null;
+    }
+    if (force) {
+      this.isExplicitlyLoggedOut = false;
+    } else if (this.isExplicitlyLoggedOut) {
+      return null;
+    }
+
     if (this._isInitializing) return this.sock;
     this._isInitializing = true;
+    this.clearReconnectTimer();
+
     try {
+      if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
+      this.ensureAuthDir();
+
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
       const { version } = await fetchLatestBaileysVersion();
+
+      if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
 
       if (state.creds?.registered) {
         this.connectionStatus = "connecting";
@@ -62,9 +94,22 @@ class UserWhatsAppSession {
         generateHighQualityLinkPreview: true
       });
 
-      this.sock.ev.on("creds.update", saveCreds);
+      this.sock.ev.on("creds.update", (...args) => {
+        if (this.isDestroyed || this.isExplicitlyLoggedOut) return;
+        saveCreds(...args);
+      });
 
       this.sock.ev.on("connection.update", async (update) => {
+        if (this.isDestroyed) return;
+        if (this.isExplicitlyLoggedOut) {
+          this.connectionStatus = "disconnected";
+          this.currentQr = null;
+          this.userProfile = null;
+          this.isSyncing = false;
+          this.clearReconnectTimer();
+          return;
+        }
+
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -90,12 +135,16 @@ class UserWhatsAppSession {
           this.currentQr = null;
           this.userProfile = null;
           this.isSyncing = false;
+          this.clearReconnectTimer();
 
           if (isLoggedOut) {
             console.log(`[WhatsApp Engine ${this.userId}] WhatsApp unlinked. Resetting auth state...`);
+            this.isExplicitlyLoggedOut = true;
             if (this.sock) {
-              try { await this.sock.logout(); } catch (_) {
-                try { this.sock.end(new Error("Logged out")); } catch (_) {}
+              const oldSock = this.sock;
+              this.sock = null;
+              try { await oldSock.logout(); } catch (_) {
+                try { oldSock.end(new Error("Logged out")); } catch (_) {}
               }
             }
             try { fs.rmSync(this.authDir, { recursive: true, force: true }); } catch (_) {}
@@ -103,9 +152,17 @@ class UserWhatsAppSession {
               await run("INSERT INTO settings (user_id, key, value) VALUES (?, 'phonebook_imported', '0') ON CONFLICT(user_id, key) DO UPDATE SET value = '0'", [this.userId]);
               await run("DELETE FROM contacts WHERE user_id = ?", [this.userId]);
             } catch (_) {}
-            setTimeout(() => this.init(), 1000);
+            // Explicitly do NOT reconnect automatically when unlinked/logged out
           } else if (shouldReconnect) {
-            setTimeout(() => this.init(), 3000);
+            if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
+              this.clearReconnectTimer();
+              this.reconnectTimer = setTimeout(() => {
+                this.reconnectTimer = null;
+                if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
+                  this.init().catch(err => console.error(`[WhatsApp Engine ${this.userId}] Reconnect error:`, err.message));
+                }
+              }, 3000);
+            }
           }
         } else if (connection === "open") {
           this.connectionStatus = "connected";
@@ -134,6 +191,7 @@ class UserWhatsAppSession {
 
       // Contact & chat sync handlers
       this.sock.ev.on("messaging-history.set", async ({ contacts, chats, messages }) => {
+        if (this.isDestroyed || this.isExplicitlyLoggedOut) return;
         this.markSyncing(6000);
         const batch = [];
 
@@ -262,8 +320,26 @@ class UserWhatsAppSession {
     }
   }
 
-  async getStatus() {
-    if (!this.sock && !this._isInitializing) {
+  async getStatus(opts = {}) {
+    const forceInit = opts.forceInit === true;
+    if (this.isDestroyed) {
+      return {
+        status: "disconnected",
+        syncing: false,
+        contactCount: 0,
+        phonebookContactCount: 0,
+        phonebookImported: false,
+        qr: null,
+        user: null
+      };
+    }
+
+    if (forceInit) {
+      this.isExplicitlyLoggedOut = false;
+      if (!this.sock && !this._isInitializing) {
+        this.init(true).catch(() => {});
+      }
+    } else if (!this.sock && !this._isInitializing && !this.isExplicitlyLoggedOut) {
       this.init().catch(() => {});
     }
 
@@ -297,8 +373,12 @@ class UserWhatsAppSession {
   }
 
   async requestPairingCode(phoneNumber) {
+    if (this.isDestroyed) {
+      throw new Error("WhatsApp session is destroyed.");
+    }
+    this.isExplicitlyLoggedOut = false;
     if (!this.sock) {
-      await this.init();
+      await this.init(true);
     }
     if (!this.sock) throw new Error("WhatsApp engine not initialized for this account.");
     let cleaned = String(phoneNumber || "").replace(/\D/g, "");
@@ -437,9 +517,17 @@ class UserWhatsAppSession {
 
   async logout() {
     console.log(`[WhatsApp Engine ${this.userId}] User triggered explicit logout. Wiping session files...`);
+    this.isExplicitlyLoggedOut = true;
+    this.clearReconnectTimer();
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout);
+      this.syncTimeout = null;
+    }
     if (this.sock) {
-      try { await this.sock.logout(); } catch (_) {
-        try { this.sock.end(new Error("Logged out")); } catch (_) {}
+      const sockToClose = this.sock;
+      this.sock = null;
+      try { await sockToClose.logout(); } catch (_) {
+        try { sockToClose.end(new Error("Logged out")); } catch (_) {}
       }
     }
     try { fs.rmSync(this.authDir, { recursive: true, force: true }); } catch (_) {}
@@ -451,8 +539,29 @@ class UserWhatsAppSession {
     this.userProfile = null;
     this.currentQr = null;
     this.isSyncing = false;
-    setTimeout(() => this.init(), 1000);
+    // Explicitly do NOT automatically reconnect after logout
     return { success: true };
+  }
+
+  async destroy() {
+    this.isDestroyed = true;
+    this.isExplicitlyLoggedOut = true;
+    this.clearReconnectTimer();
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout);
+      this.syncTimeout = null;
+    }
+    if (this.sock) {
+      const sockToClose = this.sock;
+      this.sock = null;
+      try { await sockToClose.logout(); } catch (_) {
+        try { sockToClose.end(new Error("Session destroyed")); } catch (_) {}
+      }
+    }
+    this.connectionStatus = "disconnected";
+    this.userProfile = null;
+    this.currentQr = null;
+    this.isSyncing = false;
   }
 }
 
@@ -464,7 +573,11 @@ function getOrCreateUserSession(userId) {
   if (!userSessions.has(userId)) {
     const session = new UserWhatsAppSession(userId);
     userSessions.set(userId, session);
-    session.init().catch(err => console.error(`[WhatsApp Engine ${userId}] Session boot error:`, err.message));
+    // Only auto-initialize if session has existing credentials on disk
+    const credsFile = path.join(session.authDir, "creds.json");
+    if (fs.existsSync(credsFile)) {
+      session.init().catch(err => console.error(`[WhatsApp Engine ${userId}] Session boot error:`, err.message));
+    }
   }
   return userSessions.get(userId);
 }
@@ -496,7 +609,10 @@ async function initAllActiveSessions() {
     const users = await all("SELECT id FROM users");
     for (const u of users) {
       const session = getOrCreateUserSession(u.id);
-      await session.init();
+      const credsFile = path.join(session.authDir, "creds.json");
+      if (fs.existsSync(credsFile)) {
+        await session.init();
+      }
     }
   } catch (err) {
     console.error("[WhatsApp Engine] Error booting active sessions:", err.message);
@@ -508,13 +624,7 @@ async function closeAndCleanupUserSession(userId) {
   if (!userId) return;
   const session = userSessions.get(userId);
   if (session) {
-    if (session.sock) {
-      try {
-        await session.sock.logout();
-      } catch (_) {
-        try { session.sock.end(new Error("User deleted")); } catch (_) {}
-      }
-    }
+    await session.destroy();
     userSessions.delete(userId);
   }
 
@@ -543,7 +653,7 @@ module.exports = {
   getOrCreateUserSession,
   initAllActiveSessions,
   closeAndCleanupUserSession,
-  getStatus: (userId) => getOrCreateUserSession(userId).getStatus(),
+  getStatus: (userId, opts) => getOrCreateUserSession(userId).getStatus(opts),
   requestPairingCode: (userId, phone) => getOrCreateUserSession(userId).requestPairingCode(phone),
   getProfilePicture: (userId, jid) => getOrCreateUserSession(userId).getProfilePicture(jid),
   formatRecipientJid: (userId, recipient) => getOrCreateUserSession(userId).formatRecipientJid(recipient),
