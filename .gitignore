@@ -1,3 +1,7 @@
+# ==============================================================================
+# WhatsApp Scheduler - Production .gitignore
+# ==============================================================================
+
 # Operating System Files
 .DS_Store
 .DS_Store?
@@ -18,26 +22,36 @@ Desktop.ini
 *.njsproj
 *.sln
 *.swp
-*.swp
 *~
-
-# Logs and Runtime Data
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
 
 # Dependencies
 node_modules/
+mobile-server/node_modules/
 .pnp
 .pnp.js
 
-# WhatsApp Session Auth & Database Files (NEVER COMMIT SENSITIVE DATA)
-auth_info_baileys/
+# Environment Variables & Secrets (NEVER COMMIT SENSITIVE KEYS)
+.env
+.env.*
+!.env.example
+*.env
+
+# SQLite Databases & Lock/Journal Files
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+mobile-server/data/
+
+# WhatsApp Multi-Device Sessions & User Uploads
+auth_info_baileys/
+sessions/
+mobile-server/sessions/
+uploads/
+mobile-server/uploads/
 
 # Android & Gradle Build Artifacts
 .gradle/
@@ -54,10 +68,31 @@ build-output/
 keystore.properties
 signing.properties
 
-# Temporary Files & Scratch Dirs
+# Logs and Runtime State
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.seed
+*.pid.lock
+
+# Test Coverage & Tooling
+coverage/
+.nyc_output/
+*.lcov
+
+# Internal Project Planning, Security Audits & AI Assistant Artifacts
+.planning/
+SECURITY_AUDIT_REPORT.md
+SECURITY_REMEDIATION_CHECKLIST.md
+.gemini/
+.agents/
+scratch/
+.scratch/
 tmp/
 temp/
 .cache/
-.scratch/
-mobile-server/data/
-data/
+
