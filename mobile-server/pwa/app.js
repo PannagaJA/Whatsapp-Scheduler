@@ -117,11 +117,15 @@ document.addEventListener("DOMContentLoaded", () => {
   function showAuthModal() {
     if (!authModal) return;
     authModal.style.display = "flex";
+    authModal.classList.add("active");
     checkAuthSetup();
   }
 
   function hideAuthModal() {
-    if (authModal) authModal.style.display = "none";
+    if (authModal) {
+      authModal.classList.remove("active");
+      authModal.style.display = "none";
+    }
     if (authErrorMsg) authErrorMsg.style.display = "none";
   }
 
