@@ -43,6 +43,8 @@ class UserWhatsAppSession {
   }
 
   async init() {
+    if (this._isInitializing) return this.sock;
+    this._isInitializing = true;
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
       const { version } = await fetchLatestBaileysVersion();
@@ -255,10 +257,16 @@ class UserWhatsAppSession {
       return this.sock;
     } catch (err) {
       console.error(`[WhatsApp Engine ${this.userId}] Initialization error:`, err.message);
+    } finally {
+      this._isInitializing = false;
     }
   }
 
   async getStatus() {
+    if (!this.sock && !this._isInitializing) {
+      this.init().catch(() => {});
+    }
+
     let count = 0;
     let phonebookCount = 0;
     let phonebookImported = false;
@@ -289,6 +297,9 @@ class UserWhatsAppSession {
   }
 
   async requestPairingCode(phoneNumber) {
+    if (!this.sock) {
+      await this.init();
+    }
     if (!this.sock) throw new Error("WhatsApp engine not initialized for this account.");
     let cleaned = String(phoneNumber || "").replace(/\D/g, "");
     if (cleaned.startsWith("0")) cleaned = cleaned.replace(/^0+/, "");
@@ -453,6 +464,7 @@ function getOrCreateUserSession(userId) {
   if (!userSessions.has(userId)) {
     const session = new UserWhatsAppSession(userId);
     userSessions.set(userId, session);
+    session.init().catch(err => console.error(`[WhatsApp Engine ${userId}] Session boot error:`, err.message));
   }
   return userSessions.get(userId);
 }
