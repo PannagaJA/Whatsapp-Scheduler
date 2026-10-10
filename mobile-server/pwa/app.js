@@ -71,7 +71,20 @@ document.addEventListener("DOMContentLoaded", () => {
   const pairCodeDisplay = document.getElementById("pairCodeDisplay");
   const pairCodeResult = document.getElementById("pairCodeResult");
 
+  // DOM Elements - Auth Modal (SEC-001)
+  const authModal = document.getElementById("authModal");
+  const authModalTitle = document.getElementById("authModalTitle");
+  const authModalDesc = document.getElementById("authModalDesc");
+  const authForm = document.getElementById("authForm");
+  const authUsernameInput = document.getElementById("authUsernameInput");
+  const authPasswordInput = document.getElementById("authPasswordInput");
+  const authErrorMsg = document.getElementById("authErrorMsg");
+  const authSubmitBtn = document.getElementById("authSubmitBtn");
+  const authSubmitText = document.getElementById("authSubmitText");
+
   // State
+  let authToken = localStorage.getItem("wa_auth_token") || "";
+  let isSetupMode = false;
   let selectedFiles = [];
   let stagedFiles = [];
   let allContacts = [];
@@ -79,6 +92,116 @@ document.addEventListener("DOMContentLoaded", () => {
   let qrPollInterval = null;
   let pairPollInterval = null;
   let statusPollInterval = null;
+
+  async function authFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    if (authToken) {
+      if (options.headers instanceof Headers) {
+        options.headers.set("Authorization", `Bearer ${authToken}`);
+      } else {
+        options.headers["Authorization"] = `Bearer ${authToken}`;
+      }
+    }
+
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 401 && !url.includes("/api/auth/")) {
+        showAuthModal();
+      }
+      return res;
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  function showAuthModal() {
+    if (!authModal) return;
+    authModal.style.display = "flex";
+    checkAuthSetup();
+  }
+
+  function hideAuthModal() {
+    if (authModal) authModal.style.display = "none";
+    if (authErrorMsg) authErrorMsg.style.display = "none";
+  }
+
+  async function checkAuthSetup() {
+    try {
+      const res = await fetch("/api/auth/setup-status");
+      const data = await res.json();
+      if (data?.setupRequired) {
+        isSetupMode = true;
+        if (authModalTitle) authModalTitle.textContent = "Initial Setup — Create Account";
+        if (authModalDesc) authModalDesc.textContent = "Welcome! Create your administrator username and password to secure your scheduler:";
+        if (authSubmitText) authSubmitText.textContent = "Create Account & Sign In";
+      } else {
+        isSetupMode = false;
+        if (authModalTitle) authModalTitle.textContent = "Sign In";
+        if (authModalDesc) authModalDesc.textContent = "Please sign in with your application credentials to continue:";
+        if (authSubmitText) authSubmitText.textContent = "Sign In";
+      }
+    } catch (_) {}
+  }
+
+  if (authForm) {
+    authForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const username = (authUsernameInput?.value || "").trim();
+      const password = authPasswordInput?.value || "";
+      if (!username || !password) return;
+
+      if (authSubmitBtn) authSubmitBtn.disabled = true;
+      if (authErrorMsg) authErrorMsg.style.display = "none";
+
+      const endpoint = isSetupMode ? "/api/auth/register" : "/api/auth/login";
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (data.success && data.token) {
+          authToken = data.token;
+          localStorage.setItem("wa_auth_token", authToken);
+          hideAuthModal();
+          showToast("✓ Signed in successfully!");
+          checkStatus();
+          loadContacts();
+          loadSchedules();
+        } else {
+          if (authErrorMsg) {
+            authErrorMsg.textContent = data.error || "Authentication failed. Please check credentials.";
+            authErrorMsg.style.display = "block";
+          }
+        }
+      } catch (err) {
+        if (authErrorMsg) {
+          authErrorMsg.textContent = "Network error connecting to server.";
+          authErrorMsg.style.display = "block";
+        }
+      } finally {
+        if (authSubmitBtn) authSubmitBtn.disabled = false;
+      }
+    };
+  }
+
+  // Initial Auth Verification
+  async function verifyInitialAuth() {
+    if (!authToken) {
+      showAuthModal();
+      return;
+    }
+    try {
+      const res = await fetch("/api/auth/me", {
+        headers: { "Authorization": `Bearer ${authToken}` }
+      });
+      if (!res.ok) {
+        showAuthModal();
+      }
+    } catch (_) {}
+  }
+  verifyInitialAuth();
 
   // Helper: Escape HTML
   
@@ -430,7 +553,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const list = typeof contacts === "string" ? JSON.parse(contacts) : contacts;
       if (Array.isArray(list) && list.length > 0) {
         updateSyncProgress(30, `Reading ${list.length} contacts from phonebook…`);
-        const res = await fetch("/api/contacts/import", {
+        const res = await authFetch("/api/contacts/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contacts: list })
@@ -482,7 +605,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           if (formatted.length > 0) {
             updateSyncProgress(40, `Importing ${formatted.length} contacts…`);
-            const res = await fetch("/api/contacts/import", {
+            const res = await authFetch("/api/contacts/import", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ contacts: formatted })
@@ -518,7 +641,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     try {
-      const res = await fetch("/api/contacts");
+      const res = await authFetch("/api/contacts");
       const data = await res.json();
       if (data?.contacts && Array.isArray(data.contacts)) {
         allContacts = data.contacts;
@@ -541,7 +664,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     try {
-      const res = await fetch(`/api/profile-pic?jid=${encodeURIComponent(jid)}`);
+      const res = await authFetch(`/api/profile-pic?jid=${encodeURIComponent(jid)}`);
       const data = await res.json();
       if (data?.url) {
         avatarCache.set(jid, data.url);
@@ -771,7 +894,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         selectedFiles.forEach(f => formData.append("attachments", f));
 
-        const res = await fetch("/api/schedules", {
+        const res = await authFetch("/api/schedules", {
           method: "POST",
           body: formData
         });
@@ -810,7 +933,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     try {
-      const res = await fetch(`/api/schedules?_t=${Date.now()}`, { cache: "no-store" });
+      const res = await authFetch(`/api/schedules?_t=${Date.now()}`, { cache: "no-store" });
       const data = await res.json();
       renderSchedules(data.schedules || []);
       if (showFeedback) {
@@ -928,7 +1051,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function deleteSchedule(id) {
     if (!confirm("Are you sure you want to delete this scheduled message?")) return;
     try {
-      const res = await fetch(`/api/schedules/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/schedules/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         showToast("✓ Scheduled message removed");
@@ -1068,7 +1191,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function checkStatus() {
     try {
-      const res = await fetch("/api/status");
+      const res = await authFetch("/api/status");
       const data = await res.json();
       
       const isConn = data.status === "connected";
@@ -1200,7 +1323,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 12. Show QR Code Modal Handler
   async function fetchQrNow() {
     try {
-      const res = await fetch("/api/qr");
+      const res = await authFetch("/api/qr");
       const data = await res.json();
       if (data.qr) {
         if (qrImg) {
@@ -1299,7 +1422,7 @@ document.addEventListener("DOMContentLoaded", () => {
       requestPairCodeBtn.innerHTML = "<span>Requesting Code…</span>";
 
       try {
-        const res = await fetch("/api/pair-code", {
+        const res = await authFetch("/api/pair-code", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ phoneNumber: phone })
@@ -1336,7 +1459,7 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         logoutBtn.disabled = true;
         logoutBtn.textContent = "Unlinking…";
-        await fetch("/api/logout", { method: "POST" });
+        await authFetch("/api/logout", { method: "POST" });
         localStorage.removeItem("wa_phonebook_synced");
         showToast("✓ WhatsApp Unlinked");
         checkStatus();
