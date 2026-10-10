@@ -74,7 +74,7 @@ jobs:
   publish_signed_release:
     name: Build & Publish Signed Release APK
     needs: ci_validation
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true' && github.event.repository.fork == false
     environment: production-release
     runs-on: ubuntu-latest
     permissions:

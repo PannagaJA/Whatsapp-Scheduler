@@ -214,10 +214,12 @@ async function runSecurityPhase4Tests() {
 }
 
 if (require.main === module) {
-  runSecurityPhase4Tests().catch((err) => {
-    console.error("Test execution failed:", err);
-    process.exit(1);
-  });
+  runSecurityPhase4Tests()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Test execution failed:", err);
+      process.exit(1);
+    });
 }
 
 module.exports = { runSecurityPhase4Tests };

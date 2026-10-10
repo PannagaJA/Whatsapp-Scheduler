@@ -101,10 +101,26 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// Multi-User Registration Mode Configuration (Default: enabled)
+function isPublicRegistrationAllowed() {
+  return process.env.ALLOW_PUBLIC_REGISTRATION !== "false";
+}
+
 // User Registration & Login Handlers
 async function isSetupRequired() {
   const row = await get("SELECT COUNT(*) as count FROM users");
   return !row || row.count === 0;
+}
+
+// Role-Based Access Control Middleware
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      error: "Administrator privileges required"
+    });
+  }
+  next();
 }
 
 async function registerUser(username, password) {
@@ -114,7 +130,7 @@ async function registerUser(username, password) {
   }
 
   const isFirst = await isSetupRequired();
-  if (!isFirst) {
+  if (!isFirst && !isPublicRegistrationAllowed()) {
     throw new Error("Registration is closed. Only the primary administrator account can be created.");
   }
 
@@ -126,7 +142,7 @@ async function registerUser(username, password) {
   const id = crypto.randomUUID();
   const passwordHash = hashPassword(password);
   const now = Date.now();
-  const role = "admin";
+  const role = isFirst ? "admin" : "user";
 
   await run(
     "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -139,6 +155,44 @@ async function registerUser(username, password) {
     token: session.token,
     expiresAt: session.expiresAt
   };
+}
+
+async function createUserByAdmin(username, password, role = "user") {
+  const cleanUsername = String(username || "").trim().toLowerCase();
+  if (!cleanUsername || cleanUsername.length < 3) {
+    throw new Error("Username must be at least 3 characters");
+  }
+
+  const existing = await get("SELECT id FROM users WHERE lower(username) = lower(?)", [cleanUsername]);
+  if (existing) {
+    throw new Error("Username is already taken");
+  }
+
+  const validRole = (role === "admin") ? "admin" : "user";
+  const id = crypto.randomUUID();
+  const passwordHash = hashPassword(password);
+  const now = Date.now();
+
+  await run(
+    "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
+    [id, cleanUsername, passwordHash, validRole, now]
+  );
+
+  return { id, username: cleanUsername, role: validRole, created_at: now };
+}
+
+async function listUsers() {
+  return await all("SELECT id, username, role, created_at FROM users ORDER BY created_at ASC");
+}
+
+async function deleteUserAccount(userId) {
+  if (!userId) throw new Error("User ID is required");
+  await run("DELETE FROM sessions WHERE user_id = ?", [userId]);
+  await run("DELETE FROM contacts WHERE user_id = ?", [userId]);
+  await run("DELETE FROM settings WHERE user_id = ?", [userId]);
+  await run("DELETE FROM schedules WHERE user_id = ?", [userId]);
+  await run("DELETE FROM users WHERE id = ?", [userId]);
+  return { success: true };
 }
 
 async function authenticateUser(username, password) {
@@ -172,7 +226,12 @@ module.exports = {
   validateSession,
   deleteSession,
   requireAuth,
+  requireAdmin,
   isSetupRequired,
+  isPublicRegistrationAllowed,
   registerUser,
+  createUserByAdmin,
+  listUsers,
+  deleteUserAccount,
   authenticateUser
 };
