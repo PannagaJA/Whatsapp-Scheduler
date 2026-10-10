@@ -1,4 +1,4 @@
-const CACHE_NAME = "wa-scheduler-pwa-v2";
+const CACHE_NAME = "wa-scheduler-pwa-v3";
 const ASSETS = [
   "/",
   "/index.html",
