@@ -2,14 +2,14 @@ name: Android CI & Controlled Release Workflow
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, security, security-remediation ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
     inputs:
       publish_release:
         description: 'Set to "true" to build and publish an official signed release APK'
-        required: true
+        required: false
         default: 'false'
         type: choice
         options:
@@ -17,12 +17,13 @@ on:
           - 'true'
       release_tag:
         description: 'Strict SemVer release tag (e.g. v1.0.1)'
-        required: true
+        required: false
         default: ''
         type: string
 
-# Top-level permissions are strictly empty; permissions are scoped at the job level
-permissions: {}
+# Default read-only permissions
+permissions:
+  contents: read
 
 jobs:
   # CI Job: Automatically builds and verifies debug APK on push/PR without publishing releases
@@ -70,15 +71,11 @@ jobs:
           path: build-output/WhatsApp-Scheduler-DEBUG.apk
           retention-days: 14
 
-  # Release Job: Only runs on deliberate manual workflow_dispatch with publish_release == 'true' on main/master
+  # Release Job: Only runs on deliberate manual workflow_dispatch with publish_release == 'true'
   publish_signed_release:
     name: Build & Publish Signed Release APK
     needs: ci_validation
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.publish_release == 'true' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
-      github.event.repository.fork == false
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true'
     environment: production-release
     runs-on: ubuntu-latest
     permissions:
@@ -108,7 +105,7 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.release_tag }}
         run: |
           echo "Validating requested release tag: '$INPUT_TAG'..."
-          if [[ -z "$INPUT_TAG" ]]; then
+          if [ -z "$INPUT_TAG" ]; then
             echo "::error::release_tag parameter is required for release publishing."
             exit 1
           fi
