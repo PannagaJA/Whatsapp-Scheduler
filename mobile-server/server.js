@@ -3,7 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { db, run, get, all, batchUpsertContacts, DB_DIR } = require("./db");
+const { db, initDb, run, get, all, batchUpsertContacts, DB_DIR } = require("./db");
 const {
   requireAuth,
   requireAdmin,
@@ -125,8 +125,9 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+// Justified body limits: file attachments stream via Multer to disk; JSON API payloads are capped at 2MB (SEC-007)
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "pwa")));
 
 // --- Application Authentication Routes (Protected by Auth Limiter) ---
@@ -220,6 +221,16 @@ app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =
     if (targetId === req.user.id) {
       return res.status(400).json({ success: false, error: "Cannot delete your own administrator account" });
     }
+    const targetUser = await get("SELECT id, role FROM users WHERE id = ?", [targetId]);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    if (targetUser.role === "admin") {
+      const adminCountRow = await get("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
+      if ((adminCountRow?.count || 0) <= 1) {
+        return res.status(400).json({ success: false, error: "Cannot delete the last administrator account" });
+      }
+    }
     await logoutSession(targetId);
     await deleteUserAccount(targetId);
     const userUploadDir = path.join(UPLOADS_DIR, targetId);
@@ -228,7 +239,8 @@ app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) =
     }
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const status = err.message.includes("last administrator") ? 400 : 500;
+    res.status(status).json({ success: false, error: err.message });
   }
 });
 
@@ -250,8 +262,19 @@ app.post("/share-target", requireAuth, upload.array("media", 10), validateAndPro
   };
 
   shareCache.set(shareId, shareData);
-  // Auto-clean cache after 15 minutes
-  setTimeout(() => shareCache.delete(shareId), 15 * 60 * 1000);
+  // Auto-clean cache and unretrieved staged files after 15 minutes
+  setTimeout(() => {
+    const expired = shareCache.get(shareId);
+    if (expired) {
+      shareCache.delete(shareId);
+      if (expired.files && expired.userId) {
+        const userFolder = path.join(UPLOADS_DIR, expired.userId);
+        for (const f of expired.files) {
+          if (f.path) safeDeleteAttachment(f.path, userFolder);
+        }
+      }
+    }
+  }, 15 * 60 * 1000);
 
   res.redirect(`/?shared=1&shareId=${shareId}`);
 });
@@ -330,7 +353,7 @@ app.get("/api/status", requireAuth, async (req, res) => {
 // API: Dedicated QR Code Endpoint
 app.get("/api/qr", requireAuth, async (req, res) => {
   try {
-    const status = await getStatus(req.user.id);
+    const status = await getStatus(req.user.id, { forceInit: true });
     res.json({ 
       success: true, 
       qr: status.qr || null, 
@@ -574,22 +597,51 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "pwa", "index.html"));
 });
 
+// Production Configuration Gate (Requirement C)
+function validateProductionConfig() {
+  if (process.env.NODE_ENV === "production") {
+    const raw = process.env.ALLOWED_ORIGINS || "";
+    if (!raw.trim()) {
+      throw new Error("PRODUCTION CONFIG ERROR: ALLOWED_ORIGINS must be set in production");
+    }
+    const origins = raw.split(",").map(o => o.trim().toLowerCase());
+    const hasLocalhost = origins.some(o => o.includes("localhost") || o.includes("127.0.0.1"));
+    if (hasLocalhost) {
+      throw new Error("PRODUCTION CONFIG ERROR: ALLOWED_ORIGINS cannot permit localhost/127.0.0.1 in production");
+    }
+  }
+  return true;
+}
+
 // Start Server & Engines
 if (require.main === module) {
-  app.listen(PORT, async () => {
-    console.log(`\n======================================================`);
-    console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
-    console.log(`🚀 Access Dashboard: http://localhost:${PORT}`);
-    console.log(`======================================================\n`);
+  try {
+    validateProductionConfig();
+  } catch (err) {
+    console.error(`\n❌ [Fatal Startup Error] ${err.message}\n`);
+    process.exit(1);
+  }
 
-    try {
-      await initAllActiveSessions();
-      startScheduler(5000);
-    } catch (err) {
-      console.error("Failed to initialize active WhatsApp sessions on boot:", err);
-    }
+  initDb().then(() => {
+    app.listen(PORT, async () => {
+      console.log(`\n======================================================`);
+      console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
+      console.log(`🚀 Access Dashboard: http://localhost:${PORT}`);
+      console.log(`======================================================\n`);
+
+      try {
+        await initAllActiveSessions();
+        startScheduler(5000);
+      } catch (err) {
+        console.error("Failed to initialize active WhatsApp sessions on boot:", err);
+      }
+    });
+  }).catch((err) => {
+    console.error("Failed to initialize database on boot:", err);
+    process.exit(1);
   });
 }
 
 module.exports = app;
+module.exports.validateProductionConfig = validateProductionConfig;
 

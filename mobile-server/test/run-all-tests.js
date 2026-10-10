@@ -5,6 +5,8 @@ const { runSecurityPhase2Tests } = require("./security-phase2.test");
 const { runSecurityPhase3Tests } = require("./security-phase3.test");
 const { runSecurityPhase4Tests } = require("./security-phase4.test");
 const { runMultiUserRegressionTests } = require("./multi-user-isolation.test");
+const { runAuditVerificationTests } = require("./audit-verification.test");
+const { runAuditFixesTests } = require("./audit-fixes.test");
 
 async function main() {
   console.log("=================================================================");
@@ -56,6 +58,12 @@ async function main() {
     console.log("\n▶️ RUNNING MULTI-USER REGRESSION SUITE...");
     await runMultiUserRegressionTests();
 
+    console.log("\n▶️ RUNNING REQUIREMENT C AUDIT VERIFICATION SUITE...");
+    await runAuditVerificationTests();
+
+    console.log("\n▶️ RUNNING AUDIT FIXES & ADMIN PANEL SUITE...");
+    await runAuditFixesTests();
+
     console.log("\n=================================================================");
     console.log("🎉 ALL TEST SUITES COMPLETED WITH 100% SUCCESS!");
     console.log("=================================================================\n");
@@ -68,6 +76,7 @@ async function main() {
       console.log("[Test Harness] Test server gracefully stopped.");
     }
   }
+  process.exit(process.exitCode || 0);
 }
 
 main().catch((err) => {

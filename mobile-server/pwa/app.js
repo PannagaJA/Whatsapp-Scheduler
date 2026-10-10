@@ -143,6 +143,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentUserRoleText && currentUser) {
       currentUserRoleText.textContent = (currentUser.role === "admin") ? "Administrator 👑" : "User";
     }
+    const navItemAdmin = document.getElementById("navItemAdmin");
+    if (navItemAdmin) {
+      if (currentUser && currentUser.role === "admin") {
+        navItemAdmin.style.display = "flex";
+      } else {
+        navItemAdmin.style.display = "none";
+        const currentActive = localStorage.getItem("wa_active_tab");
+        if (currentActive === "paneAdmin") {
+          switchTab("paneSchedule");
+        }
+      }
+    }
   }
 
   function updateAuthModalUI() {
@@ -382,6 +394,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // 3. Tab Switching with Persistent State across Refreshes
   function switchTab(targetId) {
     if (!targetId) targetId = "paneSchedule";
+    if (targetId === "paneAdmin" && (!currentUser || currentUser.role !== "admin")) {
+      targetId = "paneSchedule";
+    }
     try { localStorage.setItem("wa_active_tab", targetId); } catch (_) {}
 
     navItems.forEach(n => {
@@ -392,7 +407,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    [paneSchedule, paneQueue, paneDevice].forEach(p => {
+    const paneAdmin = document.getElementById("paneAdmin");
+    [paneSchedule, paneQueue, paneDevice, paneAdmin].forEach(p => {
       if (p) {
         if (p.id === targetId) {
           p.classList.add("active");
@@ -408,6 +424,8 @@ document.addEventListener("DOMContentLoaded", () => {
       loadContacts();
     } else if (targetId === "paneDevice") {
       checkStatus();
+    } else if (targetId === "paneAdmin") {
+      loadAdminUsers();
     }
   }
 
@@ -1670,6 +1688,185 @@ document.addEventListener("DOMContentLoaded", () => {
     } else {
       if (updateBanner) updateBanner.style.display = "none";
     }
+  }
+
+  // 14. Admin User Management Controller
+  const adminAlertBanner = document.getElementById("adminAlertBanner");
+  const adminUserCountBadge = document.getElementById("adminUserCountBadge");
+  const adminUserListLoading = document.getElementById("adminUserListLoading");
+  const adminUserListContainer = document.getElementById("adminUserListContainer");
+  const adminCreateUserForm = document.getElementById("adminCreateUserForm");
+  const adminNewUsername = document.getElementById("adminNewUsername");
+  const adminNewPassword = document.getElementById("adminNewPassword");
+  const adminNewRole = document.getElementById("adminNewRole");
+  const btnAdminCreateUser = document.getElementById("btnAdminCreateUser");
+  const btnRefreshAdminUsers = document.getElementById("btnRefreshAdminUsers");
+
+  function showAdminAlert(message, isError = false) {
+    if (!adminAlertBanner) return;
+    adminAlertBanner.textContent = message;
+    adminAlertBanner.style.display = "block";
+    adminAlertBanner.style.background = isError ? "rgba(241, 92, 109, 0.15)" : "rgba(0, 168, 132, 0.15)";
+    adminAlertBanner.style.color = isError ? "#f15c6d" : "#00a884";
+    adminAlertBanner.style.border = isError ? "1px solid rgba(241, 92, 109, 0.3)" : "1px solid rgba(0, 168, 132, 0.3)";
+    setTimeout(() => {
+      if (adminAlertBanner) adminAlertBanner.style.display = "none";
+    }, 6000);
+  }
+
+  async function loadAdminUsers() {
+    if (!currentUser || currentUser.role !== "admin") return;
+    if (adminUserListLoading) adminUserListLoading.style.display = "block";
+
+    try {
+      const res = await authFetch("/api/admin/users");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to fetch users (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const users = data.users || [];
+      if (adminUserCountBadge) {
+        adminUserCountBadge.textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
+      }
+
+      if (adminUserListContainer) {
+        adminUserListContainer.innerHTML = "";
+        const adminCount = users.filter(u => u.role === "admin").length;
+
+        users.forEach(u => {
+          const isSelf = currentUser && u.id === currentUser.id;
+          const isLastAdmin = (u.role === "admin" && adminCount <= 1);
+          const card = document.createElement("div");
+          card.style.background = "var(--bg-input)";
+          card.style.borderRadius = "var(--radius-sm)";
+          card.style.padding = "12px 14px";
+          card.style.display = "flex";
+          card.style.alignItems = "center";
+          card.style.justifyContent = "space-between";
+          card.style.gap = "10px";
+          card.style.border = "1px solid var(--border-light)";
+
+          const createdDate = u.created_at ? new Date(u.created_at).toLocaleDateString() : "";
+          const waStatusText = u.whatsappStatus === "connected" ? "WA Connected" : "WA Disconnected";
+
+          card.innerHTML = `
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-weight: 600; font-size: 14px; color: var(--text-primary); word-break: break-all;">${escapeHtml(u.username)}</span>
+                <span style="font-size: 11px; padding: 2px 7px; border-radius: 9999px; font-weight: 600; background: ${u.role === 'admin' ? 'rgba(247, 166, 0, 0.15)' : 'rgba(255, 255, 255, 0.08)'}; color: ${u.role === 'admin' ? '#f7a600' : 'var(--text-secondary)'};">
+                  ${u.role === 'admin' ? 'Admin 👑' : 'User'}
+                </span>
+                <span style="font-size: 11px; padding: 2px 7px; border-radius: 9999px; font-weight: 500; background: ${u.whatsappStatus === 'connected' ? 'rgba(0, 168, 132, 0.15)' : 'rgba(102, 119, 129, 0.15)'}; color: ${u.whatsappStatus === 'connected' ? '#00a884' : 'var(--text-muted)'};">
+                  ${waStatusText}
+                </span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                ID: ${u.id.substring(0, 8)}… ${createdDate ? '• Created ' + createdDate : ''}
+              </div>
+            </div>
+            <div>
+              ${isSelf ? `
+                <span style="font-size: 11px; color: var(--text-muted); padding: 5px 8px; border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.04); display: inline-block;">You</span>
+              ` : isLastAdmin ? `
+                <span style="font-size: 11px; color: var(--warning); padding: 5px 8px; border-radius: var(--radius-sm); background: rgba(247, 166, 0, 0.08); display: inline-block;">Last Admin</span>
+              ` : `
+                <button type="button" class="btn-delete-user" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" style="background: rgba(241, 92, 109, 0.12); color: var(--danger); border: 1px solid rgba(241, 92, 109, 0.25); padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  <span>Delete</span>
+                </button>
+              `}
+            </div>
+          `;
+          adminUserListContainer.appendChild(card);
+        });
+
+        // Attach delete listeners
+        adminUserListContainer.querySelectorAll(".btn-delete-user").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            const uid = btn.getAttribute("data-user-id");
+            const uname = btn.getAttribute("data-username");
+            if (!confirm(`Are you sure you want to delete user "${uname}"?\n\nThis will wipe all their WhatsApp sessions, scheduled messages, contacts, and uploaded attachments.`)) {
+              return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = "Deleting…";
+
+            try {
+              const delRes = await authFetch(`/api/admin/users/${uid}`, { method: "DELETE" });
+              const delData = await delRes.json().catch(() => ({}));
+              if (!delRes.ok) {
+                throw new Error(delData.error || `Failed to delete user (${delRes.status})`);
+              }
+              showAdminAlert(`✓ User "${uname}" deleted successfully.`);
+              loadAdminUsers();
+            } catch (err) {
+              showAdminAlert(err.message, true);
+              btn.disabled = false;
+              btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>Delete</span>`;
+            }
+          });
+        });
+      }
+    } catch (err) {
+      showAdminAlert(err.message, true);
+    } finally {
+      if (adminUserListLoading) adminUserListLoading.style.display = "none";
+    }
+  }
+
+  if (adminCreateUserForm) {
+    adminCreateUserForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = (adminNewUsername?.value || "").trim();
+      const password = (adminNewPassword?.value || "").trim();
+      const role = adminNewRole?.value || "user";
+
+      if (username.length < 3) {
+        showAdminAlert("Username must be at least 3 characters", true);
+        return;
+      }
+      if (password.length < 6) {
+        showAdminAlert("Password must be at least 6 characters", true);
+        return;
+      }
+
+      if (btnAdminCreateUser) {
+        btnAdminCreateUser.disabled = true;
+        btnAdminCreateUser.textContent = "Creating User…";
+      }
+
+      try {
+        const res = await authFetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, role })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to create user");
+        }
+        showAdminAlert(`✓ User "${username}" (${role}) created successfully!`);
+        if (adminNewUsername) adminNewUsername.value = "";
+        if (adminNewPassword) adminNewPassword.value = "";
+        if (adminNewRole) adminNewRole.value = "user";
+        loadAdminUsers();
+      } catch (err) {
+        showAdminAlert(err.message, true);
+      } finally {
+        if (btnAdminCreateUser) {
+          btnAdminCreateUser.disabled = false;
+          btnAdminCreateUser.textContent = "Create User";
+        }
+      }
+    });
+  }
+
+  if (btnRefreshAdminUsers) {
+    btnRefreshAdminUsers.addEventListener("click", () => {
+      loadAdminUsers();
+    });
   }
 
   setTimeout(checkForUpdates, 1500);

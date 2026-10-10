@@ -273,6 +273,71 @@
           </div>
         </div>
       </section>
+
+      <!-- Tab 4: Admin Console (Admin Only) -->
+      <section class="tab-pane" id="paneAdmin">
+        <div class="device-card">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <h2>Administrator Console 👑</h2>
+            <button type="button" class="btn-secondary" id="btnRefreshAdminUsers" style="padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+          <p class="card-desc">Multi-user account provisioning and administrative lifecycle management.</p>
+
+          <!-- Admin Alert Banner -->
+          <div id="adminAlertBanner" style="display: none; padding: 10px 14px; border-radius: var(--radius-sm); margin-bottom: 14px; font-size: 13px;"></div>
+
+          <!-- Create User Box -->
+          <div style="background: var(--bg-input); border-radius: var(--radius-md); padding: 14px; margin-bottom: 20px; border: 1px solid var(--border-light);">
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+              <span>Create New User Account</span>
+            </div>
+            <form id="adminCreateUserForm">
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Username (min 3 chars)</label>
+                <input type="text" id="adminNewUsername" placeholder="e.g. bob" autocomplete="off" required style="width: 100%; padding: 10px 12px; font-size: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary);">
+              </div>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Password (min 6 chars)</label>
+                <input type="password" id="adminNewPassword" placeholder="••••••••" required style="width: 100%; padding: 10px 12px; font-size: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary);">
+              </div>
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Role</label>
+                <select id="adminNewRole" style="width: 100%; padding: 10px 12px; font-size: 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary);">
+                  <option value="user">User</option>
+                  <option value="admin">Administrator 👑</option>
+                </select>
+              </div>
+              <button type="submit" class="btn-primary" id="btnAdminCreateUser" style="width: 100%; justify-content: center; padding: 10px;">
+                <span>Create User</span>
+              </button>
+            </form>
+          </div>
+
+          <!-- Existing Users List -->
+          <div>
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+              <span style="display: flex; align-items: center; gap: 8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>Registered Users</span>
+              </span>
+              <span id="adminUserCountBadge" style="font-size: 12px; background: rgba(var(--accent-rgb), 0.15); color: var(--accent); padding: 2px 8px; border-radius: var(--radius-full); font-weight: 600;">0 users</span>
+            </div>
+
+            <div id="adminUserListLoading" style="display: none; padding: 20px; text-align: center; color: var(--text-secondary);">
+              <span class="sync-spinner-inline" style="width: 20px; height: 20px; border-width: 2px; vertical-align: middle; margin-right: 8px;"></span>
+              <span>Loading users…</span>
+            </div>
+
+            <div id="adminUserListContainer" style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- User Cards inserted dynamically -->
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Bottom Navigation Bar -->
@@ -303,6 +368,13 @@
           <line x1="12" y1="18" x2="12.01" y2="18"></line>
         </svg>
         <span>Device Link</span>
+      </button>
+
+      <button type="button" class="nav-item" id="navItemAdmin" data-tab="paneAdmin" style="display: none;">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>Admin 👑</span>
       </button>
     </nav>
   </div>
