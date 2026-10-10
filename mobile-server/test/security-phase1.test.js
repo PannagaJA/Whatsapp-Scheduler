@@ -154,6 +154,9 @@ async function runSecurityPhase1Tests() {
     console.log(`  ℹ️  Using existing user '${row.username}' for authenticated tests`);
   }
 
+  const { registerLimiterInstance } = require("../rateLimiter");
+  if (registerLimiterInstance) registerLimiterInstance.reset();
+
   await test("Registration lockdown: Secondary public registration attempts are rejected with 400", async () => {
     const res = await request("/api/auth/register", {
       method: "POST",

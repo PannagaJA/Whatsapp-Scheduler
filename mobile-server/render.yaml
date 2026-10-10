@@ -14,3 +14,5 @@ services:
         value: production
       - key: DATA_DIR
         value: /var/data
+      - key: ALLOWED_ORIGINS
+        value: https://my-whatsapp-scheduler.onrender.com

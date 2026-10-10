@@ -95,8 +95,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccessFromFileURLs(false);
+        settings.setAllowUniversalAccessFromFileURLs(false);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setSupportZoom(false);
@@ -105,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         }
 
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidNative");
@@ -251,12 +253,17 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void copyToClipboard(String text) {
+            if (text == null) return;
+            final String sanitized = text.replaceAll("[\\p{Cntrl}&&[^\r\n\t]]", "").trim();
+            final String safeText = sanitized.length() > 500 ? sanitized.substring(0, 500) : sanitized;
+            if (safeText.isEmpty()) return;
+
             runOnUiThread(() -> {
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                ClipData clip = ClipData.newPlainText("WhatsApp Code", text);
+                ClipData clip = ClipData.newPlainText("WhatsApp Code", safeText);
                 if (clipboard != null) {
                     clipboard.setPrimaryClip(clip);
-                    Toast.makeText(MainActivity.this, "Copied code: " + text, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "Copied to clipboard", Toast.LENGTH_SHORT).show();
                 }
             });
         }
