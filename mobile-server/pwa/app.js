@@ -1570,7 +1570,135 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateVersionTag = document.getElementById("updateVersionTag");
   const updateNotes = document.getElementById("updateNotes");
   const updateNowBtn = document.getElementById("updateNowBtn");
+  const updateNowText = document.getElementById("updateNowText");
   const updateDismissBtn = document.getElementById("updateDismissBtn");
+  const updateProgressWrap = document.getElementById("updateProgressWrap");
+  const updateProgressFill = document.getElementById("updateProgressFill");
+  const updateProgressPercent = document.getElementById("updateProgressPercent");
+  const updateProgressBytes = document.getElementById("updateProgressBytes");
+
+  // Global callbacks for AndroidNative update download progress
+  window.onUpdateDownloadProgress = function(percent, curBytes, totalBytes) {
+    if (updateProgressWrap) updateProgressWrap.style.display = "block";
+    if (updateDismissBtn) updateDismissBtn.style.display = "none";
+    if (updateNowBtn) {
+      updateNowBtn.disabled = true;
+      if (updateNowText) {
+        updateNowText.textContent = percent >= 0 ? `${percent}%` : "Downloading…";
+      }
+    }
+    if (updateProgressFill) {
+      const pct = Math.max(0, Math.min(100, percent >= 0 ? percent : 0));
+      updateProgressFill.style.width = pct + "%";
+    }
+    if (updateProgressPercent) {
+      updateProgressPercent.textContent = percent >= 0 ? `${percent}%` : "Downloading…";
+    }
+    if (updateProgressBytes) {
+      if (totalBytes > 0 && curBytes > 0) {
+        const curMB = (curBytes / 1048576).toFixed(1);
+        const totalMB = (totalBytes / 1048576).toFixed(1);
+        updateProgressBytes.textContent = `${curMB} MB / ${totalMB} MB`;
+      } else if (curBytes > 0) {
+        const curMB = (curBytes / 1048576).toFixed(1);
+        updateProgressBytes.textContent = `${curMB} MB`;
+      }
+    }
+    if (btnDownloadApkDirect) {
+      btnDownloadApkDirect.disabled = true;
+      btnDownloadApkDirect.classList.add("btn-disabled");
+      btnDownloadApkDirect.innerHTML = `<span class="sync-spinner-inline" style="width: 13px; height: 13px; border-width: 2px;"></span> <span>Downloading… ${percent >= 0 ? percent + "%" : ""}</span>`;
+    }
+  };
+
+  window.onUpdateDownloadComplete = function(isInstallerLaunched) {
+    if (updateProgressFill) updateProgressFill.style.width = "100%";
+    if (updateProgressPercent) updateProgressPercent.textContent = "100%";
+    if (isInstallerLaunched) {
+      if (updateNowText) updateNowText.textContent = "Installing…";
+      if (updateNotes) updateNotes.textContent = "Opening Android package installer…";
+      if (btnDownloadApkDirect) {
+        btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Opening Installer…</span>';
+      }
+      showToast("✓ Update downloaded. Opening Android installer…", 4000);
+    } else {
+      if (updateNowText) updateNowText.textContent = "Downloaded";
+      if (updateNotes) updateNotes.textContent = "APK downloaded. Open the downloaded file to install.";
+      if (updateDismissBtn) updateDismissBtn.style.display = "inline-block";
+      if (btnDownloadApkDirect) {
+        btnDownloadApkDirect.disabled = false;
+        btnDownloadApkDirect.classList.remove("btn-disabled");
+        btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Downloaded (Open File)</span>';
+      }
+      showToast("✓ APK downloaded. Tap file to install.", 5000);
+    }
+  };
+
+  window.onUpdateDownloadError = function(errMsg) {
+    if (updateProgressWrap) updateProgressWrap.style.display = "none";
+    if (updateDismissBtn) updateDismissBtn.style.display = "inline-block";
+    if (updateNowBtn) {
+      updateNowBtn.disabled = false;
+      if (updateNowText) updateNowText.textContent = "Retry Update";
+    }
+    if (updateNotes) updateNotes.textContent = "Update failed: " + (errMsg || "Download error");
+    if (btnDownloadApkDirect) {
+      btnDownloadApkDirect.disabled = false;
+      btnDownloadApkDirect.classList.remove("btn-disabled");
+      btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg><span>Retry Download</span>';
+    }
+    showToast("Update error: " + (errMsg || "Could not complete download"), 5000);
+  };
+
+  async function triggerUpdateDownload(apkUrl) {
+    if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
+      window.onUpdateDownloadProgress(0, 0, 0);
+      window.AndroidNative.downloadAndInstallUpdate(apkUrl);
+    } else {
+      try {
+        window.onUpdateDownloadProgress(0, 0, 0);
+        const res = await fetch(apkUrl);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const contentLength = res.headers.get("content-length");
+        const total = contentLength ? parseInt(contentLength, 10) : 0;
+        const reader = res.body.getReader();
+        let received = 0;
+        const chunks = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          const pct = total > 0 ? Math.round((received / total) * 100) : -1;
+          window.onUpdateDownloadProgress(pct, received, total);
+        }
+        const blob = new Blob(chunks, { type: "application/vnd.android.package-archive" });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = "WhatsApp-Scheduler.apk";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        window.onUpdateDownloadComplete(false);
+      } catch (err) {
+        window.onUpdateDownloadError(err.message || "Download failed");
+        // Keep failure state visible and provide user-initiated link to apkUrl as fallback
+        if (updateNowBtn) {
+          updateNowBtn.disabled = false;
+          if (updateNowText) updateNowText.textContent = "Download in Browser";
+          updateNowBtn.onclick = () => window.open(apkUrl, "_blank");
+        }
+        if (btnDownloadApkDirect) {
+          btnDownloadApkDirect.disabled = false;
+          btnDownloadApkDirect.classList.remove("btn-disabled");
+          btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg><span>Download in Browser</span>';
+          btnDownloadApkDirect.onclick = () => window.open(apkUrl, "_blank");
+        }
+      }
+    }
+  }
 
   function isNewerVersion(latest, current) {
     if (!latest || !current) return false;
@@ -1646,12 +1774,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btnDownloadApkDirect.classList.remove("btn-disabled");
         btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download Update</span>';
         btnDownloadApkDirect.onclick = () => {
-          if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
-            showToast("Starting APK download…", 3000);
-            window.AndroidNative.downloadAndInstallUpdate(apkUrl);
-          } else {
-            window.open(apkUrl, "_blank");
-          }
+          triggerUpdateDownload(apkUrl);
         };
       } else {
         btnDownloadApkDirect.disabled = true;
@@ -1670,12 +1793,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (updateNowBtn) {
           updateNowBtn.onclick = () => {
-            if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
-              showToast("Starting in-app download…", 3000);
-              window.AndroidNative.downloadAndInstallUpdate(apkUrl);
-            } else {
-              window.open(apkUrl, "_blank");
-            }
+            triggerUpdateDownload(apkUrl);
           };
         }
 

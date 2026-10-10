@@ -67,11 +67,23 @@
           <div class="update-text">
             <div class="update-title">New Update Available (<span id="updateVersionTag">v1.1.0</span>)</div>
             <div class="update-desc" id="updateNotes">Tap to download and update without losing data.</div>
+            <div class="update-progress-wrap" id="updateProgressWrap" style="display: none;">
+              <div class="update-progress-bar">
+                <div class="update-progress-fill" id="updateProgressFill" style="width: 0%;"></div>
+              </div>
+              <div class="update-progress-labels">
+                <span id="updateProgressPercent">0%</span>
+                <span id="updateProgressBytes">0 MB / 0 MB</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="update-actions">
+        <div class="update-actions" id="updateActions">
           <button type="button" class="btn-update-dismiss" id="updateDismissBtn">Later</button>
-          <button type="button" class="btn-update-now" id="updateNowBtn" style="display: inline-flex; align-items: center; gap: 6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg><span>Update</span></button>
+          <button type="button" class="btn-update-now" id="updateNowBtn" style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg id="updateNowIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            <span id="updateNowText">Update</span>
+          </button>
         </div>
       </div>
 
