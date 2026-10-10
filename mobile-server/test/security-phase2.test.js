@@ -471,7 +471,7 @@ async function runSecurityPhase2Tests() {
     const workflowContent = fs.readFileSync(workflowPath, "utf8");
 
     // 1. Permissions: Scoped at job level (contents: read for CI, contents: write only for release)
-    assert.ok(workflowContent.includes("permissions: {}"), "Top-level permissions must be empty");
+    assert.ok(workflowContent.includes("permissions:\n  contents: read"), "Top-level permissions must default to read");
     assert.ok(workflowContent.includes("contents: read"), "CI job must have read-only contents permission");
     assert.ok(workflowContent.includes("environment: production-release"), "Release job must use protected environment");
 
