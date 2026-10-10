@@ -49,6 +49,10 @@ android/local.properties
 *.apk
 *.aab
 build-output/
+*.jks
+*.keystore
+keystore.properties
+signing.properties
 
 # Temporary Files & Scratch Dirs
 tmp/

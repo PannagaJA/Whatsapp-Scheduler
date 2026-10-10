@@ -357,6 +357,34 @@
     </div>
   </div>
 
+  <!-- Application Authentication Modal (SEC-001) -->
+  <div class="modal-overlay" id="authModal" style="display: none; z-index: 9999;">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="authModalTitle">Sign In</h3>
+      </div>
+      <div class="modal-body">
+        <p class="modal-help" id="authModalDesc" style="margin-bottom: 14px; text-align: left;">
+          Please sign in with your application account to access your WhatsApp Scheduler:
+        </p>
+        <form id="authForm" onsubmit="return false;">
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Username</label>
+            <input type="text" id="authUsernameInput" required autocomplete="username" placeholder="Enter username" style="width: 100%; padding: 12px 14px; font-size: 15px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--input-bg); color: var(--text-main);">
+          </div>
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Password</label>
+            <input type="password" id="authPasswordInput" required autocomplete="current-password" placeholder="Enter password (min 6 chars)" style="width: 100%; padding: 12px 14px; font-size: 15px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--input-bg); color: var(--text-main);">
+          </div>
+          <div id="authErrorMsg" style="display: none; color: #ff6b6b; font-size: 13px; margin-bottom: 12px; font-weight: 500;"></div>
+          <button type="submit" class="btn-primary" id="authSubmitBtn" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px;">
+            <span id="authSubmitText">Sign In</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 

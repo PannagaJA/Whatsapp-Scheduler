@@ -1,12 +1,18 @@
 const express = require("express");
 const multer = require("multer");
-const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const { db, run, get, all, DB_DIR } = require("./db");
+const { db, run, get, all, batchUpsertContacts, DB_DIR } = require("./db");
 const {
-  initWhatsAppEngine,
+  requireAuth,
+  isSetupRequired,
+  registerUser,
+  authenticateUser,
+  deleteSession
+} = require("./auth");
+const {
+  initAllActiveSessions,
   getStatus,
   requestPairingCode,
   getProfilePicture,
@@ -14,10 +20,21 @@ const {
   sendWhatsAppMessage,
   logoutSession
 } = require("./engine");
-const { startScheduler } = require("./scheduler");
+const { startScheduler, safeDeleteAttachment, isPathContained } = require("./scheduler");
+const { validateUploadedFile, sanitizeFilename } = require("./fileValidator");
+const {
+  loginLimiter,
+  registerLimiter,
+  pairingLimiter,
+  contactImportLimiter,
+  generalApiLimiter
+} = require("./rateLimiter");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust reverse proxy (Render load balancer) for accurate client IP resolution
+app.set("trust proxy", 1);
 
 // Setup Storage for Attachments
 const UPLOADS_DIR = path.join(DB_DIR, "uploads");
@@ -28,35 +45,133 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`);
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-zA-Z0-9.]/g, "");
+    cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
   }
 });
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB max limit per file (SEC-007)
+    files: 10
+  }
+});
+
+// Middleware for File Validation and Sanitization (SEC-007)
+function validateAndProcessUploads(req, res, next) {
+  if (req.files && req.files.length > 0) {
+    for (const f of req.files) {
+      try {
+        validateUploadedFile(f);
+      } catch (err) {
+        // Cleanup all uploaded files in this request on validation error
+        for (const file of req.files) {
+          if (file.path && fs.existsSync(file.path)) {
+            try { fs.unlinkSync(file.path); } catch (_) {}
+          }
+        }
+        return res.status(400).json({ success: false, error: `Invalid attachment: ${err.message}` });
+      }
+    }
+  }
+  next();
+}
 
 // In-Memory Staged Files Cache (For Share Target API)
 const shareCache = new Map();
 
-// Middleware
-app.use(cors());
+// Strict CORS Middleware (SEC-009)
+const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000";
+const allowedOriginsSet = new Set(rawAllowedOrigins.split(",").map(o => o.trim().toLowerCase()).filter(Boolean));
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const normalizedOrigin = origin.trim().toLowerCase();
+    if (allowedOriginsSet.has(normalizedOrigin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    } else {
+      if (req.method === "OPTIONS") {
+        return res.status(403).json({ success: false, error: "CORS: Origin not permitted" });
+      }
+    }
+  }
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+
+// Security Headers
 app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   next();
 });
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "pwa")));
 
+// --- Application Authentication Routes (Protected by Auth Limiter) ---
+app.get("/api/auth/setup-status", async (req, res) => {
+  try {
+    const isSetup = await isSetupRequired();
+    res.json({ success: true, setupRequired: isSetup });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/register", registerLimiter, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await registerUser(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/login", loginLimiter, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const result = await authenticateUser(username, password);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(401).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", requireAuth, async (req, res) => {
+  try {
+    if (req.sessionToken) {
+      await deleteSession(req.sessionToken);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ success: true, user: req.user });
+});
+
 // Web Share Target API Endpoint (Android Native Intent Receiver)
-app.post("/share-target", upload.array("media", 10), (req, res) => {
+app.post("/share-target", requireAuth, upload.array("media", 10), validateAndProcessUploads, (req, res) => {
   const shareId = crypto.randomUUID();
   const shareData = {
+    userId: req.user.id,
     title: req.body.title || "",
     text: req.body.text || "",
     url: req.body.url || "",
     files: (req.files || []).map(f => ({
-      name: f.originalname,
+      name: sanitizeFilename(f.originalname),
       filename: f.filename,
       size: f.size,
       type: f.mimetype,
@@ -71,24 +186,23 @@ app.post("/share-target", upload.array("media", 10), (req, res) => {
   res.redirect(`/?shared=1&shareId=${shareId}`);
 });
 
-// API: Retrieve Shared Data
-app.get("/api/shared/:shareId", (req, res) => {
+// API: Retrieve Shared Data (Strict user ownership check)
+app.get("/api/shared/:shareId", requireAuth, (req, res) => {
   const shareId = req.params.shareId;
   const data = shareCache.get(shareId);
-  if (data) {
+  if (data && data.userId === req.user.id) {
     shareCache.delete(shareId);
-    res.json({ success: true, ...data });
+    const { userId, ...safeData } = data;
+    res.json({ success: true, ...safeData });
   } else {
     res.status(404).json({ success: false, error: "Share data expired or not found" });
   }
 });
 
-// API: Status & Diagnostics (returns real-time syncing progress & contact count)
-
 // Cache resolved GitHub release for 15 seconds to be ultra fast and bypass rate limits
 let cachedRelease = { version: null, checkedAt: 0 };
 
-// API: App Version & Direct APK Download Info
+// API: App Version & Direct APK Download Info (Public)
 app.get("/api/version", async (req, res) => {
   const now = Date.now();
   if (cachedRelease.version && (now - cachedRelease.checkedAt < 15000)) {
@@ -131,9 +245,12 @@ app.get("/api/version", async (req, res) => {
   });
 });
 
-app.get("/api/status", async (req, res) => {
+// --- General API Routes (Protected by General API Limiter & requireAuth) ---
+app.use("/api", generalApiLimiter);
+
+app.get("/api/status", requireAuth, async (req, res) => {
   try {
-    const status = await getStatus();
+    const status = await getStatus(req.user.id);
     res.json({ success: true, ...status });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -141,9 +258,9 @@ app.get("/api/status", async (req, res) => {
 });
 
 // API: Dedicated QR Code Endpoint
-app.get("/api/qr", async (req, res) => {
+app.get("/api/qr", requireAuth, async (req, res) => {
   try {
-    const status = await getStatus();
+    const status = await getStatus(req.user.id);
     res.json({ 
       success: true, 
       qr: status.qr || null, 
@@ -155,14 +272,14 @@ app.get("/api/qr", async (req, res) => {
   }
 });
 
-// API: Request 8-digit Pairing Code (accepts phoneNumber or phone)
-app.post("/api/pair-code", async (req, res) => {
+// API: Request 8-digit Pairing Code (Protected by Pairing Limiter)
+app.post("/api/pair-code", requireAuth, pairingLimiter, async (req, res) => {
   try {
     const phoneNumber = req.body.phoneNumber || req.body.phone;
     if (!phoneNumber) {
       return res.status(400).json({ success: false, error: "Phone number is required (e.g. 919876543210)" });
     }
-    const code = await requestPairingCode(phoneNumber);
+    const code = await requestPairingCode(req.user.id, phoneNumber);
     res.json({ success: true, code });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -170,19 +287,19 @@ app.post("/api/pair-code", async (req, res) => {
 });
 
 // API: Logout
-app.post("/api/logout", async (req, res) => {
+app.post("/api/logout", requireAuth, async (req, res) => {
   try {
-    await logoutSession();
+    await logoutSession(req.user.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// API: List Contacts (Only returns contacts if phonebook is imported or groups)
-app.get("/api/contacts", async (req, res) => {
+// API: List Contacts (Only returns contacts if phonebook is imported or groups for this user)
+app.get("/api/contacts", requireAuth, async (req, res) => {
   try {
-    const setting = await get("SELECT value FROM settings WHERE key = 'phonebook_imported'");
+    const setting = await get("SELECT value FROM settings WHERE user_id = ? AND key = 'phonebook_imported'", [req.user.id]);
     const phonebookImported = setting ? setting.value === "1" : false;
 
     if (!phonebookImported) {
@@ -195,28 +312,27 @@ app.get("/api/contacts", async (req, res) => {
              phone, 
              is_group 
       FROM contacts 
-      WHERE jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
+      WHERE user_id = ?
+        AND jid NOT LIKE '%@lid' AND (jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us')
         AND (source = 'phonebook' OR is_group = 1 OR (nullif(name, '') IS NOT NULL AND name != 'WhatsApp' AND name != 'Contact'))
       ORDER BY is_group ASC, (CASE WHEN nullif(name, '') IS NOT NULL THEN 0 ELSE 1 END), updated_at DESC
       LIMIT 5000
-    `);
+    `, [req.user.id]);
     res.json({ success: true, contacts, count: contacts.length, phonebookImported: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// API: Bulk Import Contacts (from Phonebook sync)
-app.post("/api/contacts/import", async (req, res) => {
+// API: Bulk Import Contacts (Protected by Contact Import Limiter)
+app.post("/api/contacts/import", requireAuth, contactImportLimiter, async (req, res) => {
   try {
     const { contacts } = req.body;
     if (!Array.isArray(contacts) || contacts.length === 0) {
       return res.status(400).json({ success: false, error: "No contacts provided" });
     }
 
-    const { batchUpsertContacts } = require("./db");
     const batch = [];
-
     for (const c of contacts) {
       const name = (c.name || "").trim();
       let rawPhone = String(c.phone || c.tel || "").replace(/\D/g, "");
@@ -238,8 +354,11 @@ app.post("/api/contacts/import", async (req, res) => {
       });
     }
 
-    const inserted = await batchUpsertContacts(batch, "phonebook");
-    await run("INSERT INTO settings (key, value) VALUES ('phonebook_imported', '1') ON CONFLICT(key) DO UPDATE SET value = '1'");
+    const inserted = await batchUpsertContacts(req.user.id, batch, "phonebook");
+    await run(
+      "INSERT INTO settings (user_id, key, value) VALUES (?, 'phonebook_imported', '1') ON CONFLICT(user_id, key) DO UPDATE SET value = '1'",
+      [req.user.id]
+    );
     res.json({ success: true, count: inserted });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -247,19 +366,19 @@ app.post("/api/contacts/import", async (req, res) => {
 });
 
 // API: Contact / Group Profile Picture
-app.get("/api/profile-pic", async (req, res) => {
+app.get("/api/profile-pic", requireAuth, async (req, res) => {
   try {
     const { jid } = req.query;
     if (!jid) return res.status(400).json({ success: false, url: null });
-    const url = await getProfilePicture(jid);
+    const url = await getProfilePicture(req.user.id, jid);
     res.json({ success: true, url });
   } catch (err) {
     res.json({ success: false, url: null });
   }
 });
 
-// API: List Scheduled Messages
-app.get("/api/schedules", async (req, res) => {
+// API: List Scheduled Messages (Scoped to user_id)
+app.get("/api/schedules", requireAuth, async (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   try {
     const schedules = await all(`
@@ -267,14 +386,16 @@ app.get("/api/schedules", async (req, res) => {
              (
                SELECT coalesce(nullif(c.name, ''), '')
                FROM contacts c
-               WHERE (c.jid IS NOT NULL AND c.jid != '' AND (c.jid = s.jid OR c.jid = s.recipient))
-                  OR (c.phone IS NOT NULL AND c.phone != '' AND (c.phone = s.recipient OR s.recipient LIKE '%' || c.phone || '%'))
+               WHERE c.user_id = s.user_id
+                 AND ((c.jid IS NOT NULL AND c.jid != '' AND (c.jid = s.jid OR c.jid = s.recipient))
+                      OR (c.phone IS NOT NULL AND c.phone != '' AND (c.phone = s.recipient OR s.recipient LIKE '%' || c.phone || '%')))
                ORDER BY (CASE WHEN nullif(c.name, '') IS NOT NULL AND c.name != 'WhatsApp' THEN 0 ELSE 1 END), c.updated_at DESC
                LIMIT 1
              ) as contact_name
       FROM schedules s
+      WHERE s.user_id = ?
       ORDER BY s.scheduled_at ASC
-    `);
+    `, [req.user.id]);
     const formatted = schedules.map(s => {
       let attachments = [];
       try { attachments = JSON.parse(s.attachments); } catch (_) {}
@@ -286,8 +407,8 @@ app.get("/api/schedules", async (req, res) => {
   }
 });
 
-// API: Create Schedule (Supports direct JSON or Multipart file uploads)
-app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => {
+// API: Create Schedule (Supports direct JSON or Multipart file uploads with validation)
+app.post("/api/schedules", requireAuth, upload.array("attachments", 10), validateAndProcessUploads, async (req, res) => {
   try {
     const id = crypto.randomUUID();
     const rawRecipient = (req.body.recipient || "").trim();
@@ -304,7 +425,7 @@ app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => 
     if (req.files && req.files.length > 0) {
       for (const f of req.files) {
         attachments.push({
-          name: f.originalname,
+          name: sanitizeFilename(f.originalname),
           filename: f.filename,
           size: f.size,
           type: f.mimetype,
@@ -313,12 +434,16 @@ app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => 
       }
     }
 
-    // If existing staged files were referenced from shareCache
+    // If existing staged files were referenced from shareCache, validate containment inside UPLOADS_DIR
     if (req.body.existingFiles) {
       try {
         const parsed = JSON.parse(req.body.existingFiles);
         if (Array.isArray(parsed)) {
-          attachments.push(...parsed);
+          for (const item of parsed) {
+            if (item.path && isPathContained(item.path, UPLOADS_DIR)) {
+              attachments.push(item);
+            }
+          }
         }
       } catch (_) {}
     }
@@ -329,40 +454,40 @@ app.post("/api/schedules", upload.array("attachments", 10), async (req, res) => 
 
     let resolvedJid = null;
     try {
-      resolvedJid = await formatRecipientJid(rawRecipient);
+      resolvedJid = await formatRecipientJid(req.user.id, rawRecipient);
     } catch (_) {}
 
     await run(`
-      INSERT INTO schedules (id, recipient, jid, text, attachments, scheduled_at, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)
-    `, [id, rawRecipient, resolvedJid, text, JSON.stringify(attachments), scheduledAt, Date.now()]);
+      INSERT INTO schedules (id, user_id, recipient, jid, text, attachments, scheduled_at, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?)
+    `, [id, req.user.id, rawRecipient, resolvedJid, text, JSON.stringify(attachments), scheduledAt, Date.now()]);
 
     res.json({
       success: true,
-      schedule: { id, recipient: rawRecipient, jid: resolvedJid, text, attachments, scheduledAt, status: "scheduled" }
+      schedule: { id, user_id: req.user.id, recipient: rawRecipient, jid: resolvedJid, text, attachments, scheduledAt, status: "scheduled" }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// API: Delete / Cancel Schedule
-app.delete("/api/schedules/:id", async (req, res) => {
+// API: Delete / Cancel Schedule (Strict ownership & path containment)
+app.delete("/api/schedules/:id", requireAuth, async (req, res) => {
   try {
-    const schedule = await get("SELECT * FROM schedules WHERE id = ?", [req.params.id]);
+    const schedule = await get("SELECT * FROM schedules WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
     if (!schedule) return res.status(404).json({ success: false, error: "Schedule not found" });
 
-    // Remove files
+    // Remove files safely with path containment
     if (schedule.attachments) {
       try {
         const files = JSON.parse(schedule.attachments);
         for (const f of files) {
-          if (f.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+          if (f.path) safeDeleteAttachment(f.path, UPLOADS_DIR);
         }
       } catch (_) {}
     }
 
-    await run("DELETE FROM schedules WHERE id = ?", [req.params.id]);
+    await run("DELETE FROM schedules WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -382,9 +507,10 @@ app.listen(PORT, async () => {
   console.log(`======================================================\n`);
 
   try {
-    await initWhatsAppEngine();
+    await initAllActiveSessions();
     startScheduler(5000);
   } catch (err) {
-    console.error("Failed to initialize WhatsApp engine on boot:", err);
+    console.error("Failed to initialize active WhatsApp sessions on boot:", err);
   }
 });
+
