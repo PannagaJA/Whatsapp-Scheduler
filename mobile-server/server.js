@@ -6,13 +6,19 @@ const crypto = require("crypto");
 const { db, run, get, all, batchUpsertContacts, DB_DIR } = require("./db");
 const {
   requireAuth,
+  requireAdmin,
   isSetupRequired,
+  isPublicRegistrationAllowed,
   registerUser,
+  createUserByAdmin,
+  listUsers,
+  deleteUserAccount,
   authenticateUser,
   deleteSession
 } = require("./auth");
 const {
   initAllActiveSessions,
+  getOrCreateUserSession,
   getStatus,
   requestPairingCode,
   getProfilePicture,
@@ -43,7 +49,13 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  destination: (req, file, cb) => {
+    const userFolder = (req.user && req.user.id) ? path.join(UPLOADS_DIR, req.user.id) : UPLOADS_DIR;
+    if (!fs.existsSync(userFolder)) {
+      fs.mkdirSync(userFolder, { recursive: true });
+    }
+    cb(null, userFolder);
+  },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-zA-Z0-9.]/g, "");
     cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
@@ -121,7 +133,11 @@ app.use(express.static(path.join(__dirname, "pwa")));
 app.get("/api/auth/setup-status", async (req, res) => {
   try {
     const isSetup = await isSetupRequired();
-    res.json({ success: true, setupRequired: isSetup });
+    res.json({
+      success: true,
+      setupRequired: isSetup,
+      allowRegistration: isSetup || isPublicRegistrationAllowed()
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -131,6 +147,8 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     const result = await registerUser(username, password);
+    // Boot Baileys session asynchronously for new user
+    getOrCreateUserSession(result.user.id);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -141,6 +159,8 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     const result = await authenticateUser(username, password);
+    // Ensure Baileys session is active
+    getOrCreateUserSession(result.user.id);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(401).json({ success: false, error: err.message });
@@ -160,6 +180,56 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({ success: true, user: req.user });
+});
+
+// --- Administrator User Management Routes (SEC-004 / Multi-Tenant Admin) ---
+app.get("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await listUsers();
+    const enriched = await Promise.all(users.map(async (u) => {
+      const status = await getStatus(u.id);
+      return {
+        id: u.id,
+        username: u.username,
+        role: u.role,
+        created_at: u.created_at,
+        whatsappStatus: status.status
+      };
+    }));
+    res.json({ success: true, users: enriched });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+    const user = await createUserByAdmin(username, password, role);
+    // Boot Baileys session asynchronously for created user
+    getOrCreateUserSession(user.id);
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete("/api/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    if (targetId === req.user.id) {
+      return res.status(400).json({ success: false, error: "Cannot delete your own administrator account" });
+    }
+    await logoutSession(targetId);
+    await deleteUserAccount(targetId);
+    const userUploadDir = path.join(UPLOADS_DIR, targetId);
+    if (fs.existsSync(userUploadDir)) {
+      try { fs.rmSync(userUploadDir, { recursive: true, force: true }); } catch (_) {}
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Web Share Target API Endpoint (Android Native Intent Receiver)
@@ -434,13 +504,14 @@ app.post("/api/schedules", requireAuth, upload.array("attachments", 10), validat
       }
     }
 
-    // If existing staged files were referenced from shareCache, validate containment inside UPLOADS_DIR
+    // If existing staged files were referenced from shareCache, validate containment inside user upload directory
     if (req.body.existingFiles) {
       try {
         const parsed = JSON.parse(req.body.existingFiles);
+        const userUploadDir = path.join(UPLOADS_DIR, req.user.id);
         if (Array.isArray(parsed)) {
           for (const item of parsed) {
-            if (item.path && isPathContained(item.path, UPLOADS_DIR)) {
+            if (item.path && isPathContained(item.path, userUploadDir)) {
               attachments.push(item);
             }
           }
@@ -477,12 +548,16 @@ app.delete("/api/schedules/:id", requireAuth, async (req, res) => {
     const schedule = await get("SELECT * FROM schedules WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
     if (!schedule) return res.status(404).json({ success: false, error: "Schedule not found" });
 
-    // Remove files safely with path containment
+    // Remove files safely with user-scoped path containment
+    const userUploadDir = path.join(UPLOADS_DIR, req.user.id);
     if (schedule.attachments) {
       try {
         const files = JSON.parse(schedule.attachments);
         for (const f of files) {
-          if (f.path) safeDeleteAttachment(f.path, UPLOADS_DIR);
+          if (f.path) {
+            safeDeleteAttachment(f.path, userUploadDir);
+            safeDeleteAttachment(f.path, UPLOADS_DIR);
+          }
         }
       } catch (_) {}
     }
@@ -500,17 +575,21 @@ app.get("*", (req, res) => {
 });
 
 // Start Server & Engines
-app.listen(PORT, async () => {
-  console.log(`\n======================================================`);
-  console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
-  console.log(`🚀 Access Dashboard: http://localhost:${PORT}`);
-  console.log(`======================================================\n`);
+if (require.main === module) {
+  app.listen(PORT, async () => {
+    console.log(`\n======================================================`);
+    console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
+    console.log(`🚀 Access Dashboard: http://localhost:${PORT}`);
+    console.log(`======================================================\n`);
 
-  try {
-    await initAllActiveSessions();
-    startScheduler(5000);
-  } catch (err) {
-    console.error("Failed to initialize active WhatsApp sessions on boot:", err);
-  }
-});
+    try {
+      await initAllActiveSessions();
+      startScheduler(5000);
+    } catch (err) {
+      console.error("Failed to initialize active WhatsApp sessions on boot:", err);
+    }
+  });
+}
+
+module.exports = app;
 

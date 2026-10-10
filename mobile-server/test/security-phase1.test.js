@@ -2,7 +2,7 @@ const assert = require("assert");
 const http = require("http");
 const crypto = require("crypto");
 const { db, run, get } = require("../db");
-const { createSession } = require("../auth");
+const { createSession, registerUser } = require("../auth");
 
 const BASE_URL = process.env.TEST_SERVER_URL || "http://127.0.0.1:3000";
 
@@ -157,14 +157,29 @@ async function runSecurityPhase1Tests() {
   const { registerLimiterInstance } = require("../rateLimiter");
   if (registerLimiterInstance) registerLimiterInstance.reset();
 
-  await test("Registration lockdown: Secondary public registration attempts are rejected with 400", async () => {
+  await test("Registration lockdown: Secondary public registration attempts are rejected when disabled", async () => {
+    process.env.ALLOW_PUBLIC_REGISTRATION = "false";
+    let threw = false;
+    try {
+      await registerUser(`attacker_${Date.now().toString(36)}`, "AttackerPassword123!");
+    } catch (err) {
+      threw = true;
+      assert.ok(err.message.includes("Registration is closed"));
+    } finally {
+      delete process.env.ALLOW_PUBLIC_REGISTRATION;
+    }
+    assert.strictEqual(threw, true, "Expected registerUser to throw when ALLOW_PUBLIC_REGISTRATION is false");
+  });
+
+  await test("Role elevation defense: Public registration can NEVER grant administrator role to later users", async () => {
+    if (registerLimiterInstance) registerLimiterInstance.reset();
+    const newUsername = `regular_user_${Date.now().toString(36)}`;
     const res = await request("/api/auth/register", {
       method: "POST",
-      body: { username: `attacker_${Date.now().toString(36)}`, password: "AttackerPassword123!" }
+      body: { username: newUsername, password: "RegularUserPass123!", role: "admin" }
     });
-    assert.strictEqual(res.status, 400, `Expected 400 registration locked, got ${res.status}`);
-    assert.strictEqual(res.body.success, false);
-    assert.ok(res.body.error.includes("Registration is closed"));
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.user.role, "user", "Secondary user must ALWAYS receive role 'user' and never 'admin'");
   });
 
   await test("Authenticated request with valid admin token succeeds on /api/auth/me", async () => {
@@ -266,10 +281,12 @@ async function runSecurityPhase1Tests() {
 }
 
 if (require.main === module) {
-  runSecurityPhase1Tests().catch((err) => {
-    console.error("Test execution failed:", err);
-    process.exit(1);
-  });
+  runSecurityPhase1Tests()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Test execution failed:", err);
+      process.exit(1);
+    });
 }
 
 module.exports = { runSecurityPhase1Tests };
