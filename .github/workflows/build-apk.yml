@@ -155,7 +155,7 @@ jobs:
         run: |
           KEYSTORE_DIR="$(mktemp -d /tmp/signing_keystore_XXXXXX)"
           KEYSTORE_FILE="$KEYSTORE_DIR/release.jks"
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$KEYSTORE_FILE"
+          printf '%s' "$KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > "$KEYSTORE_FILE"
           chmod 600 "$KEYSTORE_FILE"
           echo "keystore_path=$KEYSTORE_FILE" >> "$GITHUB_OUTPUT"
           echo "keystore_dir=$KEYSTORE_DIR" >> "$GITHUB_OUTPUT"
