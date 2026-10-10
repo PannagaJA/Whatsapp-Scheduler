@@ -72,6 +72,10 @@ async function runMultiUserRegressionTests() {
     }
   }
 
+  const { loginLimiterInstance, registerLimiterInstance } = require("../rateLimiter");
+  if (loginLimiterInstance) loginLimiterInstance.reset();
+  if (registerLimiterInstance) registerLimiterInstance.reset();
+
   // Spin up an ephemeral HTTP server for deterministic local execution
   const server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

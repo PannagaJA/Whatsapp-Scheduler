@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node test/security-phase1.test.js && node test/security-phase2.test.js && node test/security-phase3.test.js && node test/security-phase4.test.js && node test/multi-user-isolation.test.js"
+    "test": "node test/run-all-tests.js"
   },
   "keywords": [
     "whatsapp",
