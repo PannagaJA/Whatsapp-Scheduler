@@ -13,6 +13,7 @@ const { run, get, all, batchUpsertContacts, migrateLegacyData, DB_DIR } = requir
 const {
   useEncryptedAuthState,
   readDecryptedJson,
+  writeEncryptedJson,
   migrateSessionDirectory,
   getSessionEncryptionKey
 } = require("./sessionCrypto");
@@ -85,6 +86,7 @@ class UserWhatsAppSession {
 
     if (this._initPromise) return this._initPromise;
     this._isInitializing = true;
+    this.connectionStatus = "connecting";
     this.clearReconnectTimer();
 
     this._initPromise = (async () => {
@@ -100,27 +102,12 @@ class UserWhatsAppSession {
         console.error(`[WhatsApp Engine ${this.userId}] Session migration warning:`, migErr.message);
       }
 
-      // Clear any leftover unconfirmed pairing state before loading auth state
-      const credsFile = path.join(this.authDir, "creds.json");
-      if (fs.existsSync(credsFile)) {
-        try {
-          const raw = readDecryptedJson(credsFile, encryptionKey);
-          if (raw && raw.me && !raw.registered) {
-            console.log(`[WhatsApp Engine ${this.userId}] Found incomplete/unregistered pairing credentials. Resetting auth directory for fresh registration...`);
-            fs.rmSync(this.authDir, { recursive: true, force: true });
-            this.ensureAuthDir();
-          }
-        } catch (_) {}
-      }
-
       const { state, saveCreds } = await useEncryptedAuthState(this.authDir, encryptionKey);
       const { version } = await fetchLatestBaileysVersion();
 
       if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
 
-      if (state.creds?.registered) {
-        this.connectionStatus = "connecting";
-      }
+      this.connectionStatus = "connecting";
 
       if (this.sock) {
         const oldSock = this.sock;
@@ -155,6 +142,10 @@ class UserWhatsAppSession {
 
         const { connection, lastDisconnect, qr } = update;
 
+        if (connection === "connecting") {
+          this.connectionStatus = "connecting";
+        }
+
         if (qr) {
           this.connectionStatus = "qr";
           try {
@@ -166,15 +157,16 @@ class UserWhatsAppSession {
 
         if (connection === "close") {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
+          const isRestartRequired = statusCode === DisconnectReason.restartRequired; // 515
           const isLoggedOut = (
             statusCode === DisconnectReason.loggedOut ||
             statusCode === DisconnectReason.badSession ||
             statusCode === DisconnectReason.multideviceMismatch ||
             statusCode === 401 ||
             statusCode === 403
-          );
+          ) && !isRestartRequired;
           const wasRegistered = Boolean(this.userProfile || this.sock?.authState?.creds?.registered);
-          const shouldReconnect = !isLoggedOut || !wasRegistered;
+          const shouldReconnect = !isLoggedOut || isRestartRequired || !wasRegistered;
 
           this.connectionStatus = shouldReconnect ? "connecting" : "disconnected";
           this.currentQr = null;
@@ -198,14 +190,6 @@ class UserWhatsAppSession {
               await run("DELETE FROM contacts WHERE user_id = ?", [this.userId]);
             } catch (_) {}
             // Explicitly do NOT reconnect automatically when unlinked/logged out
-          } else if (isLoggedOut && !wasRegistered) {
-            // Unregistered connection drop / rejected pairing attempt: clean up and null dead socket
-            if (this.sock) {
-              const oldSock = this.sock;
-              this.sock = null;
-              try { oldSock.end(new Error("Unregistered connection closed")); } catch (_) {}
-            }
-            try { fs.rmSync(this.authDir, { recursive: true, force: true }); } catch (_) {}
           } else if (shouldReconnect) {
             if (this.sock) {
               const oldSock = this.sock;
@@ -219,7 +203,7 @@ class UserWhatsAppSession {
                 if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
                   this.init().catch(err => console.error(`[WhatsApp Engine ${this.userId}] Reconnect error:`, err.message));
                 }
-              }, 3000);
+              }, isRestartRequired ? 500 : 3000);
             }
           }
         } else if (connection === "open") {
@@ -399,7 +383,9 @@ class UserWhatsAppSession {
 
     if (forceInit) {
       this.isExplicitlyLoggedOut = false;
-      if ((!this.sock || this.connectionStatus === "disconnected") && !this._isInitializing) {
+      const isConnecting = this.connectionStatus === "connecting" || this._isInitializing;
+      const isAlreadyActive = this.sock && (this.connectionStatus === "qr" || this.connectionStatus === "connected" || this.sock.ws?.isOpen);
+      if (!isConnecting && !isAlreadyActive) {
         this.init(true).catch(() => {});
       }
     } else if (!this.sock && !this._isInitializing && !this.isExplicitlyLoggedOut) {
@@ -453,6 +439,11 @@ class UserWhatsAppSession {
           cleanup();
           resolve();
         } else if (update.connection === "close") {
+          const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+          if (statusCode === 515) {
+            // Transient restart required; continue waiting for the restarted socket
+            return;
+          }
           cleanup();
           reject(new Error("WhatsApp connection closed while establishing handshake. Please try again."));
         }
@@ -548,11 +539,12 @@ class UserWhatsAppSession {
         delete this.sock.authState.creds.pairingCode;
         if (fs.existsSync(credsFile)) {
           try {
-            const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
-            if (raw.me && !raw.registered) {
+            const encryptionKey = getSessionEncryptionKey();
+            const raw = readDecryptedJson(credsFile, encryptionKey);
+            if (raw && raw.me && !raw.registered) {
               delete raw.me;
               delete raw.pairingCode;
-              fs.writeFileSync(credsFile, JSON.stringify(raw, null, 2));
+              writeEncryptedJson(credsFile, raw, encryptionKey);
             }
           } catch (_) {}
         }
