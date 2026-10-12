@@ -423,6 +423,36 @@ class UserWhatsAppSession {
     };
   }
 
+  async waitForSocketOpen(timeoutMs = 10000) {
+    if (this.sock?.ws?.isOpen) return;
+    if (this.sock?.waitForSocketOpen) {
+      try {
+        await this.sock.waitForSocketOpen();
+        return;
+      } catch (_) {}
+    }
+    return new Promise((resolve, reject) => {
+      if (!this.sock?.ws) return reject(new Error("No active WhatsApp socket."));
+      if (this.sock.ws.isOpen) return resolve();
+      let cleanup;
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timeout waiting for WhatsApp connection to open."));
+      }, timeoutMs);
+      const onOpen = () => { cleanup(); resolve(); };
+      const onClose = (err) => { cleanup(); reject(err || new Error("Socket closed")); };
+      cleanup = () => {
+        clearTimeout(timer);
+        this.sock?.ws?.off("open", onOpen);
+        this.sock?.ws?.off("close", onClose);
+        this.sock?.ws?.off("error", onClose);
+      };
+      this.sock.ws.on("open", onOpen);
+      this.sock.ws.on("close", onClose);
+      this.sock.ws.on("error", onClose);
+    });
+  }
+
   async waitForSocketReadyForPairing(timeoutMs = 15000) {
     if (this.sock?.authState?.creds?.registered) return;
     if (this.sock?.ws?.isOpen && (this.connectionStatus === "qr" || this.currentQr)) {
@@ -493,13 +523,14 @@ class UserWhatsAppSession {
       await this.init(true);
     }
 
-    // If socket is not ready yet, wait for handshake
-    try {
-      await this.waitForSocketReadyForPairing(15000);
-    } catch (_) {
-      // If the socket timed out or connection dropped, re-initialize once and retry wait
-      await this.init(true);
-      await this.waitForSocketReadyForPairing(15000);
+    // Wait for socket connection to be open (~300ms)
+    if (!this.sock?.ws?.isOpen) {
+      try {
+        await this.waitForSocketOpen(8000);
+      } catch (_) {
+        await this.init(true);
+        await this.waitForSocketOpen(8000);
+      }
     }
 
     if (!this.sock) {
