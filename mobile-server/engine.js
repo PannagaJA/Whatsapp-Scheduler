@@ -31,7 +31,16 @@ class UserWhatsAppSession {
     this.isExplicitlyLoggedOut = false;
     this.isDestroyed = false;
     this._isInitializing = false;
+    this._initPromise = null;
     this.authDir = path.join(SESSIONS_BASE_DIR, userId, "auth_info_baileys");
+  }
+
+  async waitForInitialization() {
+    if (this._initPromise) {
+      try {
+        await this._initPromise;
+      } catch (_) {}
+    }
   }
 
   ensureAuthDir() {
@@ -68,13 +77,27 @@ class UserWhatsAppSession {
       return null;
     }
 
-    if (this._isInitializing) return this.sock;
+    if (this._initPromise) return this._initPromise;
     this._isInitializing = true;
     this.clearReconnectTimer();
 
-    try {
+    this._initPromise = (async () => {
+      try {
       if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
       this.ensureAuthDir();
+
+      // Clear any leftover unconfirmed pairing state before loading auth state
+      const credsFile = path.join(this.authDir, "creds.json");
+      if (fs.existsSync(credsFile)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
+          if (raw.me && !raw.registered) {
+            console.log(`[WhatsApp Engine ${this.userId}] Found incomplete/unregistered pairing credentials. Resetting auth directory for fresh registration...`);
+            fs.rmSync(this.authDir, { recursive: true, force: true });
+            this.ensureAuthDir();
+          }
+        } catch (_) {}
+      }
 
       const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
       const { version } = await fetchLatestBaileysVersion();
@@ -83,6 +106,12 @@ class UserWhatsAppSession {
 
       if (state.creds?.registered) {
         this.connectionStatus = "connecting";
+      }
+
+      if (this.sock) {
+        const oldSock = this.sock;
+        this.sock = null;
+        try { oldSock.end(new Error("Replacing existing socket during init")); } catch (_) {}
       }
 
       this.sock = makeWASocket({
@@ -130,14 +159,16 @@ class UserWhatsAppSession {
             statusCode === 401 ||
             statusCode === 403
           );
-          const shouldReconnect = !isLoggedOut;
+          const wasRegistered = Boolean(this.userProfile || this.sock?.authState?.creds?.registered);
+          const shouldReconnect = !isLoggedOut || !wasRegistered;
+
           this.connectionStatus = shouldReconnect ? "connecting" : "disconnected";
           this.currentQr = null;
           this.userProfile = null;
           this.isSyncing = false;
           this.clearReconnectTimer();
 
-          if (isLoggedOut) {
+          if (isLoggedOut && wasRegistered) {
             console.log(`[WhatsApp Engine ${this.userId}] WhatsApp unlinked. Resetting auth state...`);
             this.isExplicitlyLoggedOut = true;
             if (this.sock) {
@@ -153,7 +184,20 @@ class UserWhatsAppSession {
               await run("DELETE FROM contacts WHERE user_id = ?", [this.userId]);
             } catch (_) {}
             // Explicitly do NOT reconnect automatically when unlinked/logged out
+          } else if (isLoggedOut && !wasRegistered) {
+            // Unregistered connection drop / rejected pairing attempt: clean up and null dead socket
+            if (this.sock) {
+              const oldSock = this.sock;
+              this.sock = null;
+              try { oldSock.end(new Error("Unregistered connection closed")); } catch (_) {}
+            }
+            try { fs.rmSync(this.authDir, { recursive: true, force: true }); } catch (_) {}
           } else if (shouldReconnect) {
+            if (this.sock) {
+              const oldSock = this.sock;
+              this.sock = null;
+              try { oldSock.end(new Error("Connection reconnecting")); } catch (_) {}
+            }
             if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
               this.clearReconnectTimer();
               this.reconnectTimer = setTimeout(() => {
@@ -312,12 +356,17 @@ class UserWhatsAppSession {
         }
       });
 
-      return this.sock;
-    } catch (err) {
-      console.error(`[WhatsApp Engine ${this.userId}] Initialization error:`, err.message);
-    } finally {
-      this._isInitializing = false;
-    }
+        return this.sock;
+      } catch (err) {
+        console.error(`[WhatsApp Engine ${this.userId}] Initialization error:`, err.message);
+        return null;
+      } finally {
+        this._isInitializing = false;
+        this._initPromise = null;
+      }
+    })();
+
+    return this._initPromise;
   }
 
   async getStatus(opts = {}) {
@@ -336,7 +385,7 @@ class UserWhatsAppSession {
 
     if (forceInit) {
       this.isExplicitlyLoggedOut = false;
-      if (!this.sock && !this._isInitializing) {
+      if ((!this.sock || this.connectionStatus === "disconnected") && !this._isInitializing) {
         this.init(true).catch(() => {});
       }
     } else if (!this.sock && !this._isInitializing && !this.isExplicitlyLoggedOut) {
@@ -372,15 +421,54 @@ class UserWhatsAppSession {
     };
   }
 
+  async waitForSocketReadyForPairing(timeoutMs = 15000) {
+    if (this.sock?.authState?.creds?.registered) return;
+    if (this.sock?.ws?.isOpen && (this.connectionStatus === "qr" || this.currentQr)) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      let cleanup;
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timeout waiting for WhatsApp connection to be ready. Please try again in a few moments."));
+      }, timeoutMs);
+
+      const onUpdate = (update) => {
+        if (update.qr || (this.sock?.ws?.isOpen && !this.sock?.authState?.creds?.registered)) {
+          cleanup();
+          resolve();
+        } else if (update.connection === "close") {
+          cleanup();
+          reject(new Error("WhatsApp connection closed while establishing handshake. Please try again."));
+        }
+      };
+
+      cleanup = () => {
+        clearTimeout(timer);
+        if (this.sock?.ev) {
+          this.sock.ev.off("connection.update", onUpdate);
+        }
+      };
+
+      if (this.sock?.ev) {
+        this.sock.ev.on("connection.update", onUpdate);
+      }
+
+      // Check once more in case it became ready during setup
+      if (this.sock?.ws?.isOpen && (this.connectionStatus === "qr" || this.currentQr)) {
+        cleanup();
+        resolve();
+      }
+    });
+  }
+
   async requestPairingCode(phoneNumber) {
     if (this.isDestroyed) {
       throw new Error("WhatsApp session is destroyed.");
     }
     this.isExplicitlyLoggedOut = false;
-    if (!this.sock) {
-      await this.init(true);
-    }
-    if (!this.sock) throw new Error("WhatsApp engine not initialized for this account.");
+
     let cleaned = String(phoneNumber || "").replace(/\D/g, "");
     if (cleaned.startsWith("0")) cleaned = cleaned.replace(/^0+/, "");
     
@@ -390,12 +478,72 @@ class UserWhatsAppSession {
 
     if (cleaned.length < 8) throw new Error("Invalid phone number. Please enter a valid 10-digit mobile number.");
 
+    // Wait for any in-progress initialization before inspecting/resetting pairing credentials
+    await this.waitForInitialization();
+
+    // Clean up any stale unconfirmed pairing credentials if not fully registered
+    const credsFile = path.join(this.authDir, "creds.json");
+    if (fs.existsSync(credsFile)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
+        if (raw.me && !raw.registered) {
+          if (this.sock) {
+            const oldSock = this.sock;
+            this.sock = null;
+            try { oldSock.end(new Error("Resetting incomplete pairing session")); } catch (_) {}
+          }
+          fs.rmSync(this.authDir, { recursive: true, force: true });
+          this.ensureAuthDir();
+          await this.init(true);
+        }
+      } catch (_) {}
+    }
+
+    if (!this.sock || this.connectionStatus === "disconnected") {
+      if (this.sock) {
+        const oldSock = this.sock;
+        this.sock = null;
+        try { oldSock.end(new Error("Closing disconnected socket before replacement")); } catch (_) {}
+      }
+      await this.init(true);
+    } else if (this.connectionStatus === "connecting" || this._isInitializing) {
+      await this.waitForSocketReadyForPairing(15000);
+    } else if (!this.sock.ws?.isOpen) {
+      const oldSock = this.sock;
+      this.sock = null;
+      try { oldSock.end(new Error("Closing stale socket before replacement")); } catch (_) {}
+      await this.init(true);
+    }
+    if (!this.sock) throw new Error("WhatsApp engine not initialized for this account.");
+
     if (this.sock.authState?.creds?.registered) {
       throw new Error("WhatsApp is already registered/linked on this account.");
     }
 
-    const code = await this.sock.requestPairingCode(cleaned);
-    return code;
+    // Wait until the socket is ready for companion pairing (registration handshake complete / QR available)
+    await this.waitForSocketReadyForPairing(15000);
+
+    try {
+      const code = await this.sock.requestPairingCode(cleaned);
+      return code;
+    } catch (err) {
+      // Revert incomplete credentials so auth directory isn't left corrupted for future QR/pairing attempts
+      if (this.sock?.authState?.creds?.me && !this.sock?.authState?.creds?.registered) {
+        delete this.sock.authState.creds.me;
+        delete this.sock.authState.creds.pairingCode;
+        if (fs.existsSync(credsFile)) {
+          try {
+            const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
+            if (raw.me && !raw.registered) {
+              delete raw.me;
+              delete raw.pairingCode;
+              fs.writeFileSync(credsFile, JSON.stringify(raw, null, 2));
+            }
+          } catch (_) {}
+        }
+      }
+      throw err;
+    }
   }
 
   async getProfilePicture(jid) {
