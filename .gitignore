@@ -67,6 +67,8 @@ build-output/
 *.keystore
 keystore.properties
 signing.properties
+keystore-base64.txt
+*.b64
 
 # Logs and Runtime State
 *.log
