@@ -3,6 +3,8 @@ package com.whatsapp.scheduler;
 import android.content.Context;
 import android.content.ClipboardManager;
 import android.content.ClipData;
+import android.content.ClipDescription;
+import android.os.PersistableBundle;
 
 import android.Manifest;
 import android.content.Intent;
@@ -268,8 +270,15 @@ public class MainActivity extends AppCompatActivity {
                 ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                 ClipData clip = ClipData.newPlainText("WhatsApp Code", safeText);
                 if (clipboard != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        PersistableBundle extras = new PersistableBundle();
+                        extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+                        clip.getDescription().setExtras(extras);
+                    }
                     clipboard.setPrimaryClip(clip);
-                    Toast.makeText(MainActivity.this, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                        Toast.makeText(MainActivity.this, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+                    }
                 }
             });
         }

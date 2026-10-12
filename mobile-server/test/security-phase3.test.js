@@ -312,6 +312,14 @@ async function runSecurityPhase3Tests() {
     assert.strictEqual(matchesDockerIgnore("pwa/index.html", serverDockerIgnore), false);
   });
 
+  await test("mobile-server/Dockerfile enforces non-root USER node and persistent storage permissions (SEC-007)", () => {
+    const dockerfileContent = fs.readFileSync(path.join(__dirname, "../Dockerfile"), "utf8");
+    assert.ok(dockerfileContent.includes("USER node"), "Dockerfile must switch to non-root USER node");
+    assert.ok(dockerfileContent.includes("chown -R node:node /app /var/data"), "Dockerfile must grant node user ownership of app and data directories");
+    assert.ok(dockerfileContent.includes("HEALTHCHECK"), "Dockerfile must define a container HEALTHCHECK");
+    assert.ok(dockerfileContent.includes("mkdir -p /var/data/uploads /var/data/sessions /app/data"), "Dockerfile must prepare persistent storage directories");
+  });
+
   // --- E. SEC-006 & SEC-012: Android Manifest, Network Config & WebView Static Verification ---
   console.log("\n📱 [E] Android Manifest, Network Security & WebView Policies (SEC-006 & SEC-012):");
 
@@ -343,6 +351,49 @@ async function runSecurityPhase3Tests() {
     const activityContent = fs.readFileSync(mainActivityPath, "utf8");
     assert.ok(activityContent.includes("replaceAll"), "Must strip control characters");
     assert.ok(activityContent.includes("500"), "Must enforce maximum length cap");
+  });
+
+  await test("MainActivity.java sets EXTRA_IS_SENSITIVE for Android 13+ clipboard privacy", () => {
+    const mainActivityPath = path.join(__dirname, "../../android/app/src/main/java/com/whatsapp/scheduler/MainActivity.java");
+    const activityContent = fs.readFileSync(mainActivityPath, "utf8");
+    assert.ok(activityContent.includes("ClipDescription.EXTRA_IS_SENSITIVE"), "Must set EXTRA_IS_SENSITIVE on Android 13+");
+    assert.ok(activityContent.includes("Build.VERSION_CODES.TIRAMISU"), "Must check TIRAMISU version code");
+  });
+
+  await test("build.gradle enables minifyEnabled and shrinkResources for release build (SEC-012)", () => {
+    const gradlePath = path.join(__dirname, "../../android/app/build.gradle");
+    const gradleContent = fs.readFileSync(gradlePath, "utf8");
+    assert.ok(gradleContent.includes("minifyEnabled true"), "minifyEnabled must be true for release build");
+    assert.ok(gradleContent.includes("shrinkResources true"), "shrinkResources must be true for release build");
+  });
+
+  await test("proguard-rules.pro preserves AndroidBridge, JavascriptInterface, and FileProvider (SEC-012)", () => {
+    const rulesPath = path.join(__dirname, "../../android/app/proguard-rules.pro");
+    const rulesContent = fs.readFileSync(rulesPath, "utf8");
+    assert.ok(rulesContent.includes("@android.webkit.JavascriptInterface"), "Must keep JavascriptInterface annotated methods");
+    assert.ok(rulesContent.includes("MainActivity$AndroidBridge"), "Must keep AndroidBridge class");
+    assert.ok(rulesContent.includes("androidx.core.content.FileProvider"), "Must keep FileProvider class");
+  });
+
+  await test("AndroidManifest.xml enforces android:allowBackup=false (SEC-002)", () => {
+    const manifestPath = path.join(__dirname, "../../android/app/src/main/AndroidManifest.xml");
+    const manifestContent = fs.readFileSync(manifestPath, "utf8");
+    assert.ok(manifestContent.includes('android:allowBackup="false"'), "allowBackup must be false to prevent ADB sandbox dumping");
+    assert.ok(!manifestContent.includes('android:allowBackup="true"'), "allowBackup=true must NOT be present");
+  });
+
+  await test("file_paths.xml scopes FileProvider strictly and removes root path exposures (SEC-003)", () => {
+    const filePathsXml = path.join(__dirname, "../../android/app/src/main/res/xml/file_paths.xml");
+    const xmlContent = fs.readFileSync(filePathsXml, "utf8");
+    assert.ok(xmlContent.includes('external-files-path'), "Must use external-files-path for updates");
+    assert.ok(!xmlContent.includes('<external-path'), "Must NOT map raw external-path root");
+    assert.ok(!xmlContent.includes('<files-path'), "Must NOT map raw internal files-path root");
+  });
+
+  await test("Git index does NOT track android/app/app-release.jks (SEC-001)", () => {
+    const { execSync } = require("child_process");
+    const trackedFiles = execSync("git ls-files", { cwd: path.join(__dirname, "../..") }).toString();
+    assert.ok(!trackedFiles.includes("android/app/app-release.jks"), "app-release.jks must NOT be tracked in the Git index");
   });
 
   console.log(`\n=================================================================`);

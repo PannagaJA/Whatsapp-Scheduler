@@ -333,6 +333,48 @@ async function runAuditFixesTests() {
       try { fs.unlinkSync(scratchDbPath); } catch (_) {}
     });
 
+    // --- SEC-008: Fair Multi-User Queue Scheduling & Starvation Defense ---
+    console.log("\n⚡ [SEC-008] Multi-User Fair Scheduling & Starvation Defense:");
+
+    await test("Fair partition scheduling prevents User A retrying jobs from starving User B due job", async () => {
+      const { checkAndProcessSchedules } = require("../scheduler");
+      const userA_id = crypto.randomUUID();
+      const userB_id = crypto.randomUUID();
+      const now = Date.now();
+
+      // Seed User A with 10 retrying/failing jobs with older timestamps
+      const userA_jobIds = [];
+      for (let i = 0; i < 10; i++) {
+        const jid = crypto.randomUUID();
+        userA_jobIds.push(jid);
+        await run(`
+          INSERT INTO schedules (id, user_id, recipient, text, scheduled_at, status, attempts, created_at)
+          VALUES (?, ?, '919111111111', ?, ?, 'retrying', 1, ?)
+        `, [jid, userA_id, `User A Job ${i}`, now - 10000 - (i * 1000), now - 10000]);
+      }
+
+      // Seed User B with 1 due job
+      const userB_jobId = crypto.randomUUID();
+      await run(`
+        INSERT INTO schedules (id, user_id, recipient, text, scheduled_at, status, attempts, created_at)
+        VALUES (?, ?, '919222222222', 'User B Message', ?, 'scheduled', 0, ?)
+      `, [userB_jobId, userB_id, now - 1000, now - 1000]);
+
+      // Execute single scheduler tick
+      await checkAndProcessSchedules();
+
+      // Verify User B's job was claimed and processed in the tick despite User A having 10 older jobs
+      const rowB = await get("SELECT status, user_id FROM schedules WHERE id = ?", [userB_jobId]);
+      assert.notStrictEqual(rowB.status, "scheduled", "User B job must NOT be starved by User A's backlog");
+      assert.strictEqual(rowB.user_id, userB_id, "Job user_id must strictly match owning user");
+
+      // Clean up
+      for (const jid of userA_jobIds) {
+        await run("DELETE FROM schedules WHERE id = ?", [jid]);
+      }
+      await run("DELETE FROM schedules WHERE id = ?", [userB_jobId]);
+    });
+
     // Clean up test users
     await deleteUserAccount(normalReg.user.id);
     await run("DELETE FROM users WHERE id = ?", [adminReg.user.id]);

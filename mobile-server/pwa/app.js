@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // State
   let authToken = localStorage.getItem("wa_auth_token") || "";
+  let csrfToken = "";
   let currentUser = null;
   let isSetupMode = false;
   let isInitialSetup = false;
@@ -100,8 +101,29 @@ document.addEventListener("DOMContentLoaded", () => {
   let pairPollInterval = null;
   let statusPollInterval = null;
 
+  function getCookie(name) {
+    try {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return decodeURIComponent(parts.pop().split(";").shift().trim());
+    } catch (_) {}
+    return "";
+  }
+
   async function authFetch(url, options = {}) {
     options.headers = options.headers || {};
+    options.credentials = "include"; // Send HttpOnly session cookies
+
+    // Attach CSRF protection token for state-changing requests
+    const effectiveCsrf = csrfToken || getCookie("wa_csrf");
+    if (effectiveCsrf) {
+      if (options.headers instanceof Headers) {
+        options.headers.set("X-CSRF-Token", effectiveCsrf);
+      } else {
+        options.headers["X-CSRF-Token"] = effectiveCsrf;
+      }
+    }
+
     if (authToken) {
       if (options.headers instanceof Headers) {
         options.headers.set("Authorization", `Bearer ${authToken}`);
@@ -220,13 +242,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ username, password })
         });
         const data = await res.json();
-        if (data.success && data.token) {
-          authToken = data.token;
+        if (data.success) {
           currentUser = data.user || { username, role: "user" };
-          localStorage.setItem("wa_auth_token", authToken);
+          if (data.csrfToken) csrfToken = data.csrfToken;
+          authToken = data.token || "";
+          // Secure transition: clear legacy token from localStorage once session cookie is established
+          try { localStorage.removeItem("wa_auth_token"); } catch (_) {}
           hideAuthModal();
           updateCurrentUserDisplay();
           showToast(`✓ Welcome, ${escapeHtml(currentUser.username)}!`);
@@ -257,6 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
         await authFetch("/api/auth/logout", { method: "POST" });
       } catch (_) {}
       authToken = "";
+      csrfToken = "";
       currentUser = null;
       localStorage.removeItem("wa_auth_token");
       localStorage.removeItem("wa_phonebook_synced");
@@ -265,25 +291,28 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
-  // Initial Auth Verification
+  // Initial Auth Verification (Supports seamless transition from localStorage to HttpOnly cookie)
   async function verifyInitialAuth() {
-    if (!authToken) {
-      showAuthModal();
-      return;
-    }
     try {
+      const headers = {};
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
       const res = await fetch("/api/auth/me", {
-        headers: { "Authorization": `Bearer ${authToken}` }
+        headers,
+        credentials: "include"
       });
       if (res.ok) {
         const data = await res.json();
         if (data?.user) {
           currentUser = data.user;
+          if (data.csrfToken) csrfToken = data.csrfToken;
+          // Session cookie verified; purge legacy localStorage token
+          try { localStorage.removeItem("wa_auth_token"); } catch (_) {}
+          authToken = "";
           updateCurrentUserDisplay();
+          return;
         }
-      } else {
-        showAuthModal();
       }
+      showAuthModal();
     } catch (_) {
       showAuthModal();
     }
@@ -674,6 +703,16 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // DPDP Act & Privacy Notice Consent Flow (SEC-013)
+    const consent = confirm(
+      "📋 Privacy Notice & Contact Sync Consent:\n\n" +
+      "By synchronizing your device contacts, contact names and phone numbers will be uploaded and stored securely in your private, isolated account for recipient selection.\n\n" +
+      "• Your contact data is strictly isolated to your account and never shared.\n" +
+      "• You may permanently erase your synced contacts anytime using the Erase button.\n\n" +
+      "Do you consent to synchronizing your contacts?"
+    );
+    if (!consent) return;
+
     if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === "function") {
       updateSyncProgress(10, "Reading Android phonebook contacts…");
       window.AndroidNative.importAllContacts();
@@ -725,6 +764,38 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   if (btnGateSyncPhonebook) {
     btnGateSyncPhonebook.onclick = triggerPhonebookSync;
+  }
+
+  const eraseContactsBtn = document.getElementById("eraseContactsBtn");
+  if (eraseContactsBtn) {
+    eraseContactsBtn.onclick = async () => {
+      const confirmDelete = confirm(
+        "⚠️ Erase Synced Contacts?\n\n" +
+        "Are you sure you want to permanently erase all synchronized contacts from your account?\n\n" +
+        "• All imported contact names and phone numbers will be deleted from the database.\n" +
+        "• Your scheduled messages will NOT be affected.\n\n" +
+        "This action cannot be undone."
+      );
+      if (!confirmDelete) return;
+
+      try {
+        const res = await authFetch("/api/contacts", { method: "DELETE" });
+        const data = await res.json();
+        if (data.success) {
+          allContacts = [];
+          avatarCache.clear();
+          localStorage.removeItem("wa_phonebook_synced");
+          showToast(`✓ Erased ${data.erasedCount || 0} contacts.`);
+          if (recipientInput) recipientInput.value = "";
+          if (contactsDropdown) contactsDropdown.style.display = "none";
+          await checkStatus();
+        } else {
+          showToast(`❌ Failed to erase contacts: ${data.error || "Unknown error"}`);
+        }
+      } catch (err) {
+        showToast("Network error while erasing contacts.");
+      }
+    };
   }
 
   // 8. Contact Autocomplete Engine

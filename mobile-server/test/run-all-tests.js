@@ -4,9 +4,12 @@ const { runSecurityPhase1Tests } = require("./security-phase1.test");
 const { runSecurityPhase2Tests } = require("./security-phase2.test");
 const { runSecurityPhase3Tests } = require("./security-phase3.test");
 const { runSecurityPhase4Tests } = require("./security-phase4.test");
+const { runPhase4HardeningTests } = require("./phase4-hardening.test");
 const { runMultiUserRegressionTests } = require("./multi-user-isolation.test");
 const { runAuditVerificationTests } = require("./audit-verification.test");
 const { runAuditFixesTests } = require("./audit-fixes.test");
+const { runSessionEncryptionTests } = require("./session-encryption.test");
+const { runAuthCookieTests } = require("./auth-cookies.test");
 
 async function main() {
   console.log("=================================================================");
@@ -55,6 +58,9 @@ async function main() {
     console.log("\n▶️ RUNNING PHASE 4 SUITE...");
     await runSecurityPhase4Tests();
 
+    console.log("\n▶️ RUNNING PHASE 4 SECURITY HARDENING SUITE (SEC-005, SEC-011, SEC-012, SEC-013)...");
+    await runPhase4HardeningTests();
+
     console.log("\n▶️ RUNNING MULTI-USER REGRESSION SUITE...");
     await runMultiUserRegressionTests();
 
@@ -63,6 +69,12 @@ async function main() {
 
     console.log("\n▶️ RUNNING AUDIT FIXES & ADMIN PANEL SUITE...");
     await runAuditFixesTests();
+
+    console.log("\n▶️ RUNNING SESSION ENCRYPTION SUITE (SEC-004)...");
+    await runSessionEncryptionTests();
+
+    console.log("\n▶️ RUNNING AUTH COOKIES & CSRF SUITE (SEC-009)...");
+    await runAuthCookieTests();
 
     console.log("\n=================================================================");
     console.log("🎉 ALL TEST SUITES COMPLETED WITH 100% SUCCESS!");

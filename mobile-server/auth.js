@@ -113,24 +113,85 @@ async function deleteSession(token) {
   await run("DELETE FROM sessions WHERE token = ?", [token]);
 }
 
-// Authentication Middleware
+// Cookie & CSRF Security Utilities (SEC-009)
+function parseCookies(req) {
+  const cookies = {};
+  const cookieHeader = req.headers.cookie;
+  if (cookieHeader) {
+    cookieHeader.split(";").forEach((cookie) => {
+      const parts = cookie.split("=");
+      const name = parts.shift().trim();
+      if (name) {
+        try {
+          cookies[name] = decodeURIComponent(parts.join("=").trim());
+        } catch (_) {
+          cookies[name] = parts.join("=").trim();
+        }
+      }
+    });
+  }
+  return cookies;
+}
+
+function generateCsrfToken(sessionToken) {
+  if (!sessionToken || typeof sessionToken !== "string") return "";
+  return crypto.createHash("sha256").update(`wa_csrf_${sessionToken}`).digest("hex");
+}
+
+function setAuthCookies(res, sessionToken) {
+  const isProd = process.env.NODE_ENV === "production";
+  const maxAgeSec = 30 * 24 * 60 * 60; // 30 days
+  const secureFlag = isProd ? "; Secure" : "";
+
+  // 1. Server-managed HttpOnly Session Cookie (mitigates XSS token extraction)
+  const sessionCookie = `wa_session=${encodeURIComponent(sessionToken)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secureFlag}`;
+
+  // 2. Client-readable CSRF Cookie (for double-submit CSRF verification)
+  const csrfToken = generateCsrfToken(sessionToken);
+  const csrfCookie = `wa_csrf=${encodeURIComponent(csrfToken)}; Path=/; Max-Age=${maxAgeSec}; SameSite=Lax${secureFlag}`;
+
+  res.setHeader("Set-Cookie", [sessionCookie, csrfCookie]);
+  return csrfToken;
+}
+
+function clearAuthCookies(res) {
+  const isProd = process.env.NODE_ENV === "production";
+  const secureFlag = isProd ? "; Secure" : "";
+  const clearSession = `wa_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secureFlag}`;
+  const clearCsrf = `wa_csrf=; Path=/; Max-Age=0; SameSite=Lax${secureFlag}`;
+  res.setHeader("Set-Cookie", [clearSession, clearCsrf]);
+}
+
+// Authentication Middleware with Dual-Stack Support & CSRF Defense (SEC-009)
 async function requireAuth(req, res, next) {
   try {
-    const authHeader = req.headers.authorization || req.headers["x-auth-token"];
     let token = null;
+    let authSource = null;
 
-    if (authHeader) {
-      if (authHeader.startsWith("Bearer ")) {
-        token = authHeader.slice(7).trim();
-      } else {
-        token = authHeader.trim();
+    // 1. Inspect HttpOnly session cookie first
+    const cookies = req.cookies || parseCookies(req);
+    if (cookies.wa_session) {
+      token = cookies.wa_session;
+      authSource = "cookie";
+    }
+
+    // 2. Fall back to Authorization / X-Auth-Token headers (API clients, WebView, migration)
+    if (!token) {
+      const authHeader = req.headers.authorization || req.headers["x-auth-token"];
+      if (authHeader) {
+        if (authHeader.startsWith("Bearer ")) {
+          token = authHeader.slice(7).trim();
+        } else {
+          token = authHeader.trim();
+        }
+        authSource = "bearer";
       }
     }
 
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: "Authentication required. Please provide a valid Authorization token."
+        error: "Authentication required. Please sign in."
       });
     }
 
@@ -142,8 +203,31 @@ async function requireAuth(req, res, next) {
       });
     }
 
+    // 3. For cookie-authenticated state-changing requests, enforce strict CSRF protection
+    if (authSource === "cookie" && ["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+      const providedCsrf = req.headers["x-csrf-token"];
+      const expectedCsrf = generateCsrfToken(token);
+
+      if (!providedCsrf || typeof providedCsrf !== "string") {
+        return res.status(403).json({
+          success: false,
+          error: "CSRF validation failed: X-CSRF-Token header is required for cookie-authenticated requests."
+        });
+      }
+
+      const bufProvided = Buffer.from(providedCsrf.trim());
+      const bufExpected = Buffer.from(expectedCsrf);
+      if (bufProvided.length !== bufExpected.length || !crypto.timingSafeEqual(bufProvided, bufExpected)) {
+        return res.status(403).json({
+          success: false,
+          error: "CSRF validation failed: Invalid CSRF token."
+        });
+      }
+    }
+
     req.user = user;
     req.sessionToken = token;
+    req.authSource = authSource;
     next();
   } catch (err) {
     res.status(500).json({ success: false, error: "Internal authentication error" });
@@ -359,6 +443,10 @@ module.exports = {
   createSession,
   validateSession,
   deleteSession,
+  parseCookies,
+  generateCsrfToken,
+  setAuthCookies,
+  clearAuthCookies,
   requireAuth,
   requireAdmin,
   isSetupRequired,

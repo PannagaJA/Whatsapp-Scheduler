@@ -16,3 +16,5 @@ services:
         value: /var/data
       - key: ALLOWED_ORIGINS
         value: https://my-whatsapp-scheduler.onrender.com
+      - key: SESSION_ENCRYPTION_KEY
+        sync: false

@@ -26,5 +26,9 @@
     "pino": "^8.21.0",
     "qrcode": "^1.5.3",
     "sqlite3": "^5.1.7"
+  },
+  "overrides": {
+    "tar": "^7.5.22",
+    "@tootallnate/once": "^2.0.1"
   }
 }

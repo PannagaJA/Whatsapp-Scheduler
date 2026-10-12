@@ -158,6 +158,10 @@
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><circle cx="12" cy="10" r="3"/><path d="M16 17a4 4 0 0 0-8 0"/></svg>
                   <span>Phonebook</span>
                 </button>
+                <button type="button" class="btn-attach" id="eraseContactsBtn" title="Erase Synced Contacts (DPDP Act / Privacy)" style="display: inline-flex; align-items: center; gap: 6px; color: #ff6b6b;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  <span>Erase</span>
+                </button>
               </div>
             </div>
             <div class="input-with-icon">
@@ -214,6 +218,17 @@
             <span>Schedule Message</span>
           </button>
         </form>
+
+        <!-- Responsible Messaging & Compliance Advisory (SEC-005 & SEC-013) -->
+        <div class="advisory-card" style="margin-top: 20px; padding: 14px 16px; background: rgba(255, 193, 7, 0.07); border: 1px solid rgba(255, 193, 7, 0.22); border-radius: 8px; font-size: 12px; color: var(--text-secondary, #aaa); line-height: 1.55;">
+          <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #ffb74d; margin-bottom: 6px;">
+            <span>⚠️ Responsible Messaging & Terms of Service Notice</span>
+          </div>
+          <p style="margin: 0 0 6px 0;">This application operates via independent automation protocols. It is <strong>not affiliated with, authorized, or endorsed by WhatsApp LLC or Meta Platforms, Inc.</strong> Automated, bulk, or high-frequency messaging carries risks of account restrictions or permanent bans under WhatsApp's Business and Consumer Terms of Service. Always obtain explicit recipient consent and maintain reasonable messaging intervals.</p>
+          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
+            <span>🔒 <strong>DPDP Act & Privacy:</strong> Synchronized address-book contacts are strictly isolated to your private account and never shared with other users. You may permanently erase your synchronized contacts at any time using the <em>Erase</em> button above without affecting message schedules.</span>
+          </div>
+        </div>
       </section>
 
       <!-- Tab 2: Queue / Schedules List -->

@@ -37,11 +37,18 @@ async function checkAndProcessSchedules() {
   try {
     const now = Date.now();
     const pendingJobs = await all(`
-      SELECT * FROM schedules 
-      WHERE status IN ('scheduled', 'retrying') 
-        AND scheduled_at <= ? 
-      ORDER BY scheduled_at ASC
-      LIMIT 10
+      SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (
+          PARTITION BY coalesce(user_id, 'unassigned') 
+          ORDER BY scheduled_at ASC
+        ) as user_job_idx
+        FROM schedules 
+        WHERE status IN ('scheduled', 'retrying') 
+          AND scheduled_at <= ?
+      )
+      WHERE user_job_idx <= 2
+      ORDER BY user_job_idx ASC, scheduled_at ASC
+      LIMIT 100
     `, [now]);
 
     if (!pendingJobs || pendingJobs.length === 0) {

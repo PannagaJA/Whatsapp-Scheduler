@@ -1,7 +1,6 @@
 const {
   default: makeWASocket,
   DisconnectReason,
-  useMultiFileAuthState,
   fetchLatestBaileysVersion,
   Browsers,
   delay
@@ -11,6 +10,12 @@ const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
 const { run, get, all, batchUpsertContacts, migrateLegacyData, DB_DIR } = require("./db");
+const {
+  useEncryptedAuthState,
+  readDecryptedJson,
+  migrateSessionDirectory,
+  getSessionEncryptionKey
+} = require("./sessionCrypto");
 
 const SESSIONS_BASE_DIR = path.join(DB_DIR, "sessions");
 if (!fs.existsSync(SESSIONS_BASE_DIR)) {
@@ -28,6 +33,7 @@ class UserWhatsAppSession {
     this.isSyncing = false;
     this.syncTimeout = null;
     this.reconnectTimer = null;
+    this.lastMessageSentAt = 0;
     this.isExplicitlyLoggedOut = false;
     this.isDestroyed = false;
     this._isInitializing = false;
@@ -85,13 +91,21 @@ class UserWhatsAppSession {
       try {
       if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
       this.ensureAuthDir();
+      const encryptionKey = getSessionEncryptionKey();
+
+      // Safely migrate any plaintext session files before initialization
+      try {
+        migrateSessionDirectory(this.authDir, encryptionKey);
+      } catch (migErr) {
+        console.error(`[WhatsApp Engine ${this.userId}] Session migration warning:`, migErr.message);
+      }
 
       // Clear any leftover unconfirmed pairing state before loading auth state
       const credsFile = path.join(this.authDir, "creds.json");
       if (fs.existsSync(credsFile)) {
         try {
-          const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
-          if (raw.me && !raw.registered) {
+          const raw = readDecryptedJson(credsFile, encryptionKey);
+          if (raw && raw.me && !raw.registered) {
             console.log(`[WhatsApp Engine ${this.userId}] Found incomplete/unregistered pairing credentials. Resetting auth directory for fresh registration...`);
             fs.rmSync(this.authDir, { recursive: true, force: true });
             this.ensureAuthDir();
@@ -99,7 +113,7 @@ class UserWhatsAppSession {
         } catch (_) {}
       }
 
-      const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+      const { state, saveCreds } = await useEncryptedAuthState(this.authDir, encryptionKey);
       const { version } = await fetchLatestBaileysVersion();
 
       if (this.isDestroyed || (this.isExplicitlyLoggedOut && !force)) return null;
@@ -485,8 +499,9 @@ class UserWhatsAppSession {
     const credsFile = path.join(this.authDir, "creds.json");
     if (fs.existsSync(credsFile)) {
       try {
-        const raw = JSON.parse(fs.readFileSync(credsFile, "utf8"));
-        if (raw.me && !raw.registered) {
+        const encryptionKey = getSessionEncryptionKey();
+        const raw = readDecryptedJson(credsFile, encryptionKey);
+        if (raw && raw.me && !raw.registered) {
           if (this.sock) {
             const oldSock = this.sock;
             this.sock = null;
@@ -630,6 +645,20 @@ class UserWhatsAppSession {
       throw new Error(`WhatsApp is not connected for user account.`);
     }
 
+    // Responsible Messaging Rate Pacing & Jitter (SEC-005)
+    const minDelayMs = parseInt(process.env.MESSAGE_MIN_DELAY_MS !== undefined ? process.env.MESSAGE_MIN_DELAY_MS : (process.env.NODE_ENV === "test" ? "0" : "1000"), 10);
+    const maxDelayMs = parseInt(process.env.MESSAGE_MAX_DELAY_MS !== undefined ? process.env.MESSAGE_MAX_DELAY_MS : (process.env.NODE_ENV === "test" ? "0" : "3000"), 10);
+
+    if (maxDelayMs > 0 && this.lastMessageSentAt > 0) {
+      const now = Date.now();
+      const elapsed = now - this.lastMessageSentAt;
+      const targetSpacing = minDelayMs + (maxDelayMs > minDelayMs ? Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) : 0);
+      if (elapsed < targetSpacing) {
+        await delay(targetSpacing - elapsed);
+      }
+    }
+    this.lastMessageSentAt = Date.now();
+
     const jid = await this.formatRecipientJid(recipient);
 
     if (attachments && attachments.length > 0) {
@@ -743,6 +772,9 @@ async function migrateLegacyAuthState() {
         for (const file of files) {
           fs.copyFileSync(path.join(legacyAuthDir, file), path.join(targetDir, file));
         }
+        try {
+          migrateSessionDirectory(targetDir, getSessionEncryptionKey());
+        } catch (_) {}
         console.log(`[Migration] Migrated legacy WhatsApp session keys to admin user ${adminUser.id}`);
       }
       await migrateLegacyData(adminUser.id);
@@ -755,8 +787,14 @@ async function initAllActiveSessions() {
   try {
     await migrateLegacyAuthState();
     const users = await all("SELECT id FROM users");
+    const encryptionKey = getSessionEncryptionKey();
     for (const u of users) {
       const session = getOrCreateUserSession(u.id);
+      try {
+        migrateSessionDirectory(session.authDir, encryptionKey);
+      } catch (migErr) {
+        console.error(`[WhatsApp Engine ${u.id}] Startup migration notice:`, migErr.message);
+      }
       const credsFile = path.join(session.authDir, "creds.json");
       if (fs.existsSync(credsFile)) {
         await session.init();

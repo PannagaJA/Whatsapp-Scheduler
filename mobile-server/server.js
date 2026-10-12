@@ -15,6 +15,9 @@ const {
   deleteUserAccount,
   authenticateUser,
   deleteSession,
+  setAuthCookies,
+  clearAuthCookies,
+  generateCsrfToken,
   bootstrapAdminFromEnv
 } = require("./auth");
 const {
@@ -90,8 +93,91 @@ function validateAndProcessUploads(req, res, next) {
   next();
 }
 
-// In-Memory Staged Files Cache (For Share Target API)
-const shareCache = new Map();
+// Bounded In-Memory Share Target Cache with TTL & Capacity Eviction (SEC-011)
+class BoundedShareCache {
+  constructor(options = {}) {
+    this.maxSize = options.maxSize || parseInt(process.env.SHARE_CACHE_MAX_ENTRIES || "100", 10);
+    this.ttlMs = options.ttlMs || parseInt(process.env.SHARE_CACHE_TTL_MS || String(15 * 60 * 1000), 10);
+    this.cache = new Map();
+  }
+
+  set(shareId, shareData, customTtlMs) {
+    if (this.cache.has(shareId)) {
+      this.delete(shareId);
+    } else if (this.cache.size >= this.maxSize) {
+      this.evictOldest();
+    }
+
+    const ttl = customTtlMs !== undefined ? customTtlMs : this.ttlMs;
+    const expiresAt = Date.now() + ttl;
+
+    const timeoutId = setTimeout(() => {
+      this.evict(shareId);
+    }, ttl);
+
+    if (timeoutId && typeof timeoutId.unref === "function") {
+      timeoutId.unref();
+    }
+
+    this.cache.set(shareId, {
+      data: shareData,
+      createdAt: Date.now(),
+      expiresAt,
+      timeoutId
+    });
+  }
+
+  get(shareId) {
+    const entry = this.cache.get(shareId);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.evict(shareId);
+      return null;
+    }
+    return entry.data;
+  }
+
+  delete(shareId) {
+    const entry = this.cache.get(shareId);
+    if (entry) {
+      if (entry.timeoutId) clearTimeout(entry.timeoutId);
+      this.cache.delete(shareId);
+      return entry.data;
+    }
+    return null;
+  }
+
+  evict(shareId) {
+    const entry = this.delete(shareId);
+    if (entry && entry.files && entry.userId) {
+      const userFolder = path.join(UPLOADS_DIR, entry.userId);
+      for (const f of entry.files) {
+        if (f.path) safeDeleteAttachment(f.path, userFolder);
+      }
+    }
+    return entry;
+  }
+
+  evictOldest() {
+    const oldestKey = this.cache.keys().next().value;
+    if (oldestKey) {
+      this.evict(oldestKey);
+    }
+  }
+
+  size() {
+    return this.cache.size;
+  }
+
+  clear() {
+    for (const [id, entry] of this.cache.entries()) {
+      if (entry.timeoutId) clearTimeout(entry.timeoutId);
+    }
+    this.cache.clear();
+  }
+}
+
+const shareCache = new BoundedShareCache();
 
 // Strict CORS Middleware (SEC-009)
 const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || process.env.RENDER_EXTERNAL_URL || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000";
@@ -105,7 +191,7 @@ app.use((req, res, next) => {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-CSRF-Token, X-Requested-With");
     } else {
       if (req.method === "OPTIONS") {
         return res.status(403).json({ success: false, error: "CORS: Origin not permitted" });
@@ -160,7 +246,8 @@ app.post("/api/auth/register", registerLimiter, async (req, res) => {
     const result = await registerUser(username, password);
     // Boot Baileys session asynchronously for new user
     getOrCreateUserSession(result.user.id);
-    res.json({ success: true, ...result });
+    const csrfToken = setAuthCookies(res, result.token);
+    res.json({ success: true, ...result, csrfToken });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -172,7 +259,8 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
     const result = await authenticateUser(username, password);
     // Ensure Baileys session is active
     getOrCreateUserSession(result.user.id);
-    res.json({ success: true, ...result });
+    const csrfToken = setAuthCookies(res, result.token);
+    res.json({ success: true, ...result, csrfToken });
   } catch (err) {
     res.status(401).json({ success: false, error: err.message });
   }
@@ -183,6 +271,7 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
     if (req.sessionToken) {
       await deleteSession(req.sessionToken);
     }
+    clearAuthCookies(res);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -190,7 +279,18 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
-  res.json({ success: true, user: req.user });
+  res.json({
+    success: true,
+    user: req.user,
+    csrfToken: generateCsrfToken(req.sessionToken)
+  });
+});
+
+app.get("/api/auth/csrf-token", requireAuth, (req, res) => {
+  res.json({
+    success: true,
+    csrfToken: generateCsrfToken(req.sessionToken)
+  });
 });
 
 // --- Administrator User Management Routes (SEC-004 / Multi-Tenant Admin) ---
@@ -272,20 +372,6 @@ app.post("/share-target", requireAuth, upload.array("media", 10), validateAndPro
   };
 
   shareCache.set(shareId, shareData);
-  // Auto-clean cache and unretrieved staged files after 15 minutes
-  setTimeout(() => {
-    const expired = shareCache.get(shareId);
-    if (expired) {
-      shareCache.delete(shareId);
-      if (expired.files && expired.userId) {
-        const userFolder = path.join(UPLOADS_DIR, expired.userId);
-        for (const f of expired.files) {
-          if (f.path) safeDeleteAttachment(f.path, userFolder);
-        }
-      }
-    }
-  }, 15 * 60 * 1000);
-
   res.redirect(`/?shared=1&shareId=${shareId}`);
 });
 
@@ -463,6 +549,21 @@ app.post("/api/contacts/import", requireAuth, contactImportLimiter, async (req, 
       [req.user.id]
     );
     res.json({ success: true, count: inserted });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// API: Erase Synced Contacts (DPDP Act / GDPR Privacy Compliance - SEC-013)
+app.delete("/api/contacts", requireAuth, async (req, res) => {
+  try {
+    const result = await run("DELETE FROM contacts WHERE user_id = ?", [req.user.id]);
+    await run("DELETE FROM settings WHERE user_id = ? AND key = 'phonebook_imported'", [req.user.id]);
+    res.json({
+      success: true,
+      erasedCount: result.changes || 0,
+      message: "All synchronized contacts erased successfully."
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -660,4 +761,6 @@ if (require.main === module) {
 
 module.exports = app;
 module.exports.validateProductionConfig = validateProductionConfig;
+module.exports.shareCache = shareCache;
+module.exports.BoundedShareCache = BoundedShareCache;
 
