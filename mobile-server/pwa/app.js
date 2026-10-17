@@ -165,6 +165,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentUserRoleText && currentUser) {
       currentUserRoleText.textContent = (currentUser.role === "admin") ? "Administrator 👑" : "User";
     }
+    const heroGreetingName = document.getElementById("heroGreetingName");
+    if (heroGreetingName && currentUser) {
+      heroGreetingName.textContent = currentUser.username || "there";
+    }
+    const heroCardUsername = document.getElementById("heroCardUsername");
+    if (heroCardUsername && currentUser) {
+      heroCardUsername.textContent = currentUser.username || "Account";
+    }
+    const headerAvatarInitial = document.getElementById("headerAvatarInitial");
+    if (headerAvatarInitial && currentUser && currentUser.username) {
+      headerAvatarInitial.textContent = currentUser.username.charAt(0).toUpperCase();
+    }
     const navItemAdmin = document.getElementById("navItemAdmin");
     if (navItemAdmin) {
       if (currentUser && currentUser.role === "admin") {
@@ -468,6 +480,44 @@ document.addEventListener("DOMContentLoaded", () => {
   if (linkDeviceBtn) {
     linkDeviceBtn.addEventListener("click", () => switchTab("paneDevice"));
   }
+
+  const btnHeroAddSchedule = document.getElementById("btnHeroAddSchedule");
+  const quickActionSend = document.getElementById("quickActionSend");
+  const quickActionRequest = document.getElementById("quickActionRequest");
+  const quickActionQr = document.getElementById("quickActionQr");
+  const quickActionMore = document.getElementById("quickActionMore");
+  const btnViewAllQueue = document.getElementById("btnViewAllQueue");
+  const headerAvatarBtn = document.getElementById("headerAvatarBtn");
+
+  const scrollToScheduleForm = () => {
+    switchTab("paneSchedule");
+    const form = document.getElementById("scheduleForm");
+    if (form) {
+      form.scrollIntoView({ behavior: "smooth" });
+    }
+    const rec = document.getElementById("recipientInput");
+    if (rec) rec.focus();
+  };
+
+  if (btnHeroAddSchedule) btnHeroAddSchedule.addEventListener("click", scrollToScheduleForm);
+  if (quickActionSend) quickActionSend.addEventListener("click", scrollToScheduleForm);
+  if (btnViewAllQueue) btnViewAllQueue.addEventListener("click", () => switchTab("paneQueue"));
+  if (quickActionMore) quickActionMore.addEventListener("click", () => switchTab("paneQueue"));
+  if (quickActionRequest) {
+    quickActionRequest.addEventListener("click", () => {
+      const showPairCodeBtn = document.getElementById("showPairCodeBtn");
+      if (showPairCodeBtn) showPairCodeBtn.click();
+      else switchTab("paneDevice");
+    });
+  }
+  if (quickActionQr) {
+    quickActionQr.addEventListener("click", () => {
+      const showQrBtn = document.getElementById("showQrBtn");
+      if (showQrBtn) showQrBtn.click();
+      else switchTab("paneDevice");
+    });
+  }
+  if (headerAvatarBtn) headerAvatarBtn.addEventListener("click", () => switchTab("paneDevice"));
 
   if (headerStatus) {
     headerStatus.style.cursor = "pointer";
@@ -1131,6 +1181,64 @@ document.addEventListener("DOMContentLoaded", () => {
       return true;
     });
 
+    // Also populate upcoming schedules on Home screen (fintech list)
+    const homeUpcomingList = document.getElementById("homeUpcomingList");
+    const heroCardQueueCount = document.getElementById("heroCardQueueCount");
+    const pendingCount = uniqueSchedules.filter(s => s.status === "scheduled" || s.status === "retrying").length;
+    if (heroCardQueueCount) {
+      heroCardQueueCount.textContent = `${pendingCount} Pending`;
+    }
+
+
+    if (homeUpcomingList) {
+      if (uniqueSchedules.length === 0) {
+        homeUpcomingList.innerHTML = `
+          <div class="fintech-item-empty">
+            <span class="empty-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+            <div class="empty-text">No pending messages in queue</div>
+            <button type="button" class="btn-subtle-add" id="btnEmptyAdd">Create First Schedule</button>
+          </div>
+        `;
+        const btnEmptyAdd = document.getElementById("btnEmptyAdd");
+        if (btnEmptyAdd) {
+          btnEmptyAdd.onclick = () => {
+            const form = document.getElementById("scheduleForm");
+            if (form) form.scrollIntoView({ behavior: "smooth" });
+            const input = document.getElementById("recipientInput");
+            if (input) input.focus();
+          };
+        }
+      } else {
+        homeUpcomingList.innerHTML = "";
+        const top3 = uniqueSchedules.slice(0, 3);
+        top3.forEach(s => {
+          const dt = new Date(s.scheduled_at);
+          const timeStr = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          const dateStr = dt.toLocaleDateString([], { month: "short", day: "numeric" });
+          const item = document.createElement("div");
+          item.className = "fintech-list-item";
+          const dName = s.contact_name || (s.recipient ? s.recipient.split("@")[0] : "Recipient");
+          item.innerHTML = `
+            <div class="fintech-item-left">
+              <div class="fintech-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </div>
+              <div class="fintech-item-details">
+                <div class="fintech-item-name">${escapeHtml(dName)}</div>
+                <div class="fintech-item-time">${escapeHtml(dateStr)}, ${escapeHtml(timeStr)}</div>
+              </div>
+            </div>
+            <span class="fintech-item-badge">${escapeHtml(s.status || "scheduled")}</span>
+          `;
+          item.style.cursor = "pointer";
+          item.onclick = () => switchTab("paneQueue");
+          homeUpcomingList.appendChild(item);
+        });
+      }
+    }
+
     if (uniqueSchedules.length === 0) {
       queueList.innerHTML = `
         <div class="empty-state">
@@ -1243,6 +1351,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (waNotConnectedCard) {
       if (!isConn) {
         waNotConnectedCard.style.display = "flex";
+        waNotConnectedCard.style.flexDirection = "column";
         if (scheduleStatusPill) {
           if (isConnecting) {
             scheduleStatusPill.className = "status-pill-badge connecting";
@@ -1402,6 +1511,41 @@ document.addEventListener("DOMContentLoaded", () => {
           devicePill.style.background = "rgba(234, 67, 53, 0.15)";
           devicePill.style.color = "#ff6b6b";
         }
+      }
+
+      const heroCardStatusLabel = document.getElementById("heroCardStatusLabel");
+      const heroCardLiveDot = document.getElementById("heroCardLiveDot");
+      const heroCardAvatarDot = document.getElementById("heroCardAvatarDot");
+      const heroCardPhone = document.getElementById("heroCardPhone");
+      const heroCardStatusSep = document.getElementById("heroCardStatusSep");
+      const avatarStatusDot = document.getElementById("avatarStatusDot");
+
+      const statusClass = isConn ? "connected" : (isConnecting ? "connecting" : "disconnected");
+
+      if (heroCardStatusLabel) {
+        heroCardStatusLabel.textContent = isConn ? "Connected" : (isConnecting ? "Connecting…" : "Disconnected");
+      }
+      if (heroCardLiveDot) {
+        heroCardLiveDot.className = "live-pulse-dot " + statusClass;
+      }
+      if (heroCardAvatarDot) {
+        heroCardAvatarDot.className = "wa-online-dot " + statusClass;
+      }
+      if (avatarStatusDot) {
+        avatarStatusDot.className = "header-avatar-status " + statusClass;
+      }
+      if (isConn && data.user) {
+        const phone = data.user.id ? data.user.id.split(":")[0] : "";
+        if (phone && phone.length >= 4) {
+          if (heroCardPhone) {
+            heroCardPhone.textContent = "•••• " + phone.slice(-4);
+            heroCardPhone.style.display = "inline";
+          }
+          if (heroCardStatusSep) heroCardStatusSep.style.display = "inline";
+        }
+      } else {
+        if (heroCardPhone) heroCardPhone.style.display = "none";
+        if (heroCardStatusSep) heroCardStatusSep.style.display = "none";
       }
 
       if (deviceUserInfo) {
@@ -1668,32 +1812,61 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 15. In-App Auto-Update Checker & Dynamic APK Download Card
   const updateBanner = document.getElementById("updateBanner");
+  const updateTitleText = document.getElementById("updateTitleText");
   const updateVersionTag = document.getElementById("updateVersionTag");
   const updateNotes = document.getElementById("updateNotes");
   const updateNowBtn = document.getElementById("updateNowBtn");
   const updateNowText = document.getElementById("updateNowText");
+  const updateNowIconWrap = document.getElementById("updateNowIconWrap");
   const updateDismissBtn = document.getElementById("updateDismissBtn");
   const updateProgressWrap = document.getElementById("updateProgressWrap");
   const updateProgressFill = document.getElementById("updateProgressFill");
   const updateProgressPercent = document.getElementById("updateProgressPercent");
   const updateProgressBytes = document.getElementById("updateProgressBytes");
+  const updateProgressStatusText = document.getElementById("updateProgressStatusText");
+  const updateProgressDot = document.getElementById("updateProgressDot");
+
+  let lastDownloadedApkBlobUrl = null;
+  let activeApkDownloadUrl = null;
+  let updateState = "idle"; // "idle" | "downloading" | "complete" | "error"
+  let updateDismissed = false;
+  let lastDownloadedSizeMB = "";
 
   // Global callbacks for AndroidNative update download progress
   window.onUpdateDownloadProgress = function(percent, curBytes, totalBytes) {
+    updateState = "downloading";
+    if (updateBanner) {
+      updateBanner.classList.add("is-downloading");
+      updateBanner.classList.remove("is-complete", "is-error");
+    }
+    if (curBytes > 0) {
+      lastDownloadedSizeMB = (curBytes / 1048576).toFixed(1);
+    }
+    if (updateTitleText) {
+      updateTitleText.textContent = (percent >= 100) ? "Finalizing Update…" : "Downloading Update…";
+    }
     if (updateProgressWrap) updateProgressWrap.style.display = "block";
+    if (updateProgressStatusText) {
+      updateProgressStatusText.textContent = (percent >= 100) ? "Verifying package…" : "Downloading APK…";
+    }
+    if (updateProgressDot) {
+      updateProgressDot.className = (percent >= 100) ? "downloading-pulse-dot complete" : "downloading-pulse-dot";
+    }
     if (updateDismissBtn) updateDismissBtn.style.display = "none";
     if (updateNowBtn) {
       updateNowBtn.disabled = true;
+      updateNowBtn.classList.add("is-downloading");
+      updateNowBtn.classList.remove("btn-complete");
       if (updateNowText) {
         updateNowText.textContent = percent >= 0 ? `${percent}%` : "Downloading…";
       }
     }
     if (updateProgressFill) {
       const pct = Math.max(0, Math.min(100, percent >= 0 ? percent : 0));
-      updateProgressFill.style.width = pct + "%";
+      updateProgressFill.style.width = (percent >= 0 ? pct : 65) + "%";
     }
     if (updateProgressPercent) {
-      updateProgressPercent.textContent = percent >= 0 ? `${percent}%` : "Downloading…";
+      updateProgressPercent.textContent = percent >= 0 ? `${percent}%` : "In progress";
     }
     if (updateProgressBytes) {
       if (totalBytes > 0 && curBytes > 0) {
@@ -1702,7 +1875,9 @@ document.addEventListener("DOMContentLoaded", () => {
         updateProgressBytes.textContent = `${curMB} MB / ${totalMB} MB`;
       } else if (curBytes > 0) {
         const curMB = (curBytes / 1048576).toFixed(1);
-        updateProgressBytes.textContent = `${curMB} MB`;
+        updateProgressBytes.textContent = `${curMB} MB downloaded`;
+      } else {
+        updateProgressBytes.textContent = "Starting download…";
       }
     }
     if (btnDownloadApkDirect) {
@@ -1712,35 +1887,105 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  window.onUpdateDownloadComplete = function(isInstallerLaunched) {
+  window.onUpdateDownloadComplete = function(isInstallerLaunched, downloadedSizeMB) {
+    updateState = "complete";
+    const displaySize = downloadedSizeMB || lastDownloadedSizeMB;
+    if (updateBanner) {
+      updateBanner.classList.remove("is-downloading");
+      updateBanner.classList.add("is-complete");
+    }
+    if (updateNowBtn) {
+      updateNowBtn.disabled = false;
+      updateNowBtn.classList.remove("is-downloading");
+      updateNowBtn.classList.add("btn-complete");
+    }
+    if (updateTitleText) updateTitleText.textContent = "Update Downloaded";
     if (updateProgressFill) updateProgressFill.style.width = "100%";
     if (updateProgressPercent) updateProgressPercent.textContent = "100%";
+    if (updateProgressStatusText) updateProgressStatusText.textContent = "Download complete";
+    if (updateProgressDot) updateProgressDot.className = "downloading-pulse-dot complete";
+    if (updateProgressBytes) {
+      updateProgressBytes.textContent = displaySize ? `${displaySize} MB • Ready` : "Ready to install";
+    }
+
+    const launchApkOrInstaller = () => {
+      if (window.AndroidNative && typeof window.AndroidNative.installPendingUpdate === "function") {
+        window.AndroidNative.installPendingUpdate();
+      } else if (lastDownloadedApkBlobUrl) {
+        const a = document.createElement("a");
+        a.href = lastDownloadedApkBlobUrl;
+        a.download = "WhatsApp-Scheduler.apk";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast("Opening WhatsApp-Scheduler.apk…", 3000);
+      } else if (activeApkDownloadUrl) {
+        window.open(activeApkDownloadUrl, "_blank");
+      }
+    };
+
     if (isInstallerLaunched) {
       if (updateNowText) updateNowText.textContent = "Installing…";
       if (updateNotes) updateNotes.textContent = "Opening Android package installer…";
+      if (updateDismissBtn) {
+        updateDismissBtn.textContent = "Dismiss";
+        updateDismissBtn.style.display = "inline-block";
+        updateDismissBtn.onclick = () => {
+          updateDismissed = true;
+          updateBanner.style.opacity = "0";
+          setTimeout(() => { updateBanner.style.display = "none"; updateBanner.style.opacity = ""; }, 250);
+        };
+      }
       if (btnDownloadApkDirect) {
+        btnDownloadApkDirect.disabled = false;
+        btnDownloadApkDirect.classList.remove("btn-disabled");
         btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Opening Installer…</span>';
+        btnDownloadApkDirect.onclick = launchApkOrInstaller;
       }
       showToast("✓ Update downloaded. Opening Android installer…", 4000);
     } else {
-      if (updateNowText) updateNowText.textContent = "Downloaded";
-      if (updateNotes) updateNotes.textContent = "APK downloaded. Open the downloaded file to install.";
-      if (updateDismissBtn) updateDismissBtn.style.display = "inline-block";
+      if (updateNowText) updateNowText.textContent = "Install Now";
+      if (updateNowIconWrap) {
+        updateNowIconWrap.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      }
+      if (updateNotes) updateNotes.textContent = "WhatsApp-Scheduler.apk is downloaded. Tap Install Now to open.";
+      if (updateDismissBtn) {
+        updateDismissBtn.textContent = "Dismiss";
+        updateDismissBtn.style.display = "inline-block";
+        updateDismissBtn.onclick = () => {
+          updateDismissed = true;
+          updateBanner.style.opacity = "0";
+          setTimeout(() => { updateBanner.style.display = "none"; updateBanner.style.opacity = ""; }, 250);
+        };
+      }
+      if (updateNowBtn) {
+        updateNowBtn.onclick = launchApkOrInstaller;
+      }
       if (btnDownloadApkDirect) {
         btnDownloadApkDirect.disabled = false;
         btnDownloadApkDirect.classList.remove("btn-disabled");
         btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>Downloaded (Open File)</span>';
+        btnDownloadApkDirect.onclick = launchApkOrInstaller;
       }
-      showToast("✓ APK downloaded. Tap file to install.", 5000);
+      showToast("✓ APK downloaded. Tap 'Install Now' to finish.", 5000);
     }
   };
 
   window.onUpdateDownloadError = function(errMsg) {
-    if (updateProgressWrap) updateProgressWrap.style.display = "none";
-    if (updateDismissBtn) updateDismissBtn.style.display = "inline-block";
+    updateState = "error";
+    if (updateBanner) {
+      updateBanner.classList.remove("is-downloading");
+      updateBanner.classList.add("is-error");
+    }
     if (updateNowBtn) {
+      updateNowBtn.classList.remove("is-downloading");
       updateNowBtn.disabled = false;
       if (updateNowText) updateNowText.textContent = "Retry Update";
+    }
+    if (updateProgressWrap) updateProgressWrap.style.display = "none";
+    if (updateDismissBtn) {
+      updateDismissBtn.textContent = "Later";
+      updateDismissBtn.style.display = "inline-block";
     }
     if (updateNotes) updateNotes.textContent = "Update failed: " + (errMsg || "Download error");
     if (btnDownloadApkDirect) {
@@ -1752,6 +1997,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   async function triggerUpdateDownload(apkUrl) {
+    activeApkDownloadUrl = apkUrl;
     if (window.AndroidNative && typeof window.AndroidNative.downloadAndInstallUpdate === "function") {
       window.onUpdateDownloadProgress(0, 0, 0);
       window.AndroidNative.downloadAndInstallUpdate(apkUrl);
@@ -1774,15 +2020,18 @@ document.addEventListener("DOMContentLoaded", () => {
           window.onUpdateDownloadProgress(pct, received, total);
         }
         const blob = new Blob(chunks, { type: "application/vnd.android.package-archive" });
-        const blobUrl = URL.createObjectURL(blob);
+        if (lastDownloadedApkBlobUrl) {
+          try { URL.revokeObjectURL(lastDownloadedApkBlobUrl); } catch (e) {}
+        }
+        lastDownloadedApkBlobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = blobUrl;
+        a.href = lastDownloadedApkBlobUrl;
         a.download = "WhatsApp-Scheduler.apk";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-        window.onUpdateDownloadComplete(false);
+        const finalSizeMB = (received / 1048576).toFixed(1);
+        window.onUpdateDownloadComplete(false, finalSizeMB);
       } catch (err) {
         window.onUpdateDownloadError(err.message || "Download failed");
         // Keep failure state visible and provide user-initiated link to apkUrl as fallback
@@ -1871,12 +2120,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (btnDownloadApkDirect) {
       if (hasNewRelease) {
-        btnDownloadApkDirect.disabled = false;
-        btnDownloadApkDirect.classList.remove("btn-disabled");
-        btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download Update</span>';
-        btnDownloadApkDirect.onclick = () => {
-          triggerUpdateDownload(apkUrl);
-        };
+        if (updateState !== "downloading" && updateState !== "complete") {
+          btnDownloadApkDirect.disabled = false;
+          btnDownloadApkDirect.classList.remove("btn-disabled");
+          btnDownloadApkDirect.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download Update</span>';
+          btnDownloadApkDirect.onclick = () => {
+            triggerUpdateDownload(apkUrl);
+          };
+        }
       } else {
         btnDownloadApkDirect.disabled = true;
         btnDownloadApkDirect.classList.add("btn-disabled");
@@ -1887,25 +2138,39 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Show Top Update Banner if newer version is found
     if (hasNewRelease) {
+      // Do not overwrite an ongoing download or completed download UI
+      if (updateState === "downloading" || updateState === "complete") {
+        return;
+      }
+      if (updateDismissed) {
+        return;
+      }
+
       if (updateBanner && updateVersionTag) {
         updateVersionTag.textContent = latestTag.startsWith("v") ? latestTag : "v" + latestTag;
+        if (updateTitleText) updateTitleText.textContent = "New Update Available";
         if (updateNotes) updateNotes.textContent = releaseName;
+        if (updateNowText) updateNowText.textContent = "Update";
+        if (updateDismissBtn) {
+          updateDismissBtn.textContent = "Later";
+          updateDismissBtn.style.display = "inline-block";
+          updateDismissBtn.onclick = () => {
+            updateDismissed = true;
+            updateBanner.style.display = "none";
+          };
+        }
         updateBanner.style.display = "flex";
 
         if (updateNowBtn) {
+          updateNowBtn.disabled = false;
+          updateNowBtn.classList.remove("is-downloading", "btn-complete");
           updateNowBtn.onclick = () => {
             triggerUpdateDownload(apkUrl);
           };
         }
-
-        if (updateDismissBtn) {
-          updateDismissBtn.onclick = () => {
-            updateBanner.style.display = "none";
-          };
-        }
       }
     } else {
-      if (updateBanner) updateBanner.style.display = "none";
+      if (updateBanner && updateState === "idle") updateBanner.style.display = "none";
     }
   }
 

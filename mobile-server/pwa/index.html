@@ -16,44 +16,51 @@
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="/style.css?v=2.0">
+  <link rel="stylesheet" href="/style.css?v=3.0">
 </head>
 <body>
   <div class="app-container">
-    <!-- Header -->
+    <!-- Header: DailyFlutterUI Clean Header -->
     <header class="app-header">
-      <div class="header-left">
-        <div class="app-logo">
-          <img src="/icons/logo-64.png" width="32" height="32" alt="App Logo" style="border-radius: 8px; display: block; object-fit: cover; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">        </div>
-        <div class="header-titles">
-          <h1>WhatsApp Scheduler</h1>
-          <div class="status-indicator connected" id="headerStatus">
-            <span class="status-dot"></span>
-            <span class="status-text">Connected</span>
-          </div>
-          <script>
-            try {
-              var s = localStorage.getItem("wa_status") || "connected";
-              var el = document.getElementById("headerStatus");
-              if (el) {
-                el.className = "status-indicator " + s;
-                var txt = el.querySelector(".status-text");
-                if (txt) txt.textContent = s === "connected" ? "Connected" : (s === "connecting" ? "Connecting…" : (s === "qr" ? "Scan QR Code" : "Disconnected"));
-              }
-            } catch (_) {}
-          </script>
-        </div>
+      <div class="header-greeting-block">
+        <h1 class="header-greeting-title">Hello <span id="heroGreetingName">there</span></h1>
+        <p class="header-greeting-sub">Let's automate your messages.</p>
       </div>
-      <div class="header-actions">
-        <button type="button" class="icon-btn" id="linkDeviceBtn" title="Link WhatsApp">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-            <line x1="12" y1="18" x2="12.01" y2="18"></line>
+      <div class="header-right-actions">
+        <!-- Hidden compatibility status indicator -->
+        <div class="status-indicator connected" id="headerStatus" style="display: none;">
+          <span class="status-dot"></span>
+          <span class="status-text">Connected</span>
+        </div>
+        <script>
+          try {
+            var s = localStorage.getItem("wa_status") || "connected";
+            var el = document.getElementById("headerStatus");
+            if (el) {
+              el.className = "status-indicator " + s;
+              var txt = el.querySelector(".status-text");
+              if (txt) txt.textContent = s === "connected" ? "Connected" : (s === "connecting" ? "Connecting…" : (s === "qr" ? "Scan QR Code" : "Disconnected"));
+            }
+          } catch (_) {}
+        </script>
+        
+        <button type="button" class="header-circle-btn" id="linkDeviceBtn" title="Link WhatsApp Device">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
           </svg>
+          <span class="header-notif-dot" id="headerNotifDot"></span>
+        </button>
+
+        <button type="button" class="header-avatar-btn" id="headerAvatarBtn" title="Account Details">
+          <div class="header-avatar-circle">
+            <span id="headerAvatarInitial">U</span>
+            <span class="header-avatar-status connected" id="avatarStatusDot"></span>
+          </div>
         </button>
       </div>
     </header>
@@ -62,28 +69,46 @@
     <main class="app-main">
       <!-- In-App Auto-Update Banner -->
       <div class="update-banner" id="updateBanner" style="display: none;">
-        <div class="update-info">
-          <span class="update-icon" style="display: inline-flex; align-items: center; justify-content: center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg></span>
-          <div class="update-text">
-            <div class="update-title">New Update Available (<span id="updateVersionTag">v1.1.0</span>)</div>
-            <div class="update-desc" id="updateNotes">Tap to download and update without losing data.</div>
-            <div class="update-progress-wrap" id="updateProgressWrap" style="display: none;">
-              <div class="update-progress-bar">
-                <div class="update-progress-fill" id="updateProgressFill" style="width: 0%;"></div>
+        <div class="update-main-row">
+          <div class="update-info">
+            <div class="update-icon update-app-icon-wrap" id="updateAppIconWrap">
+              <img src="/icons/icon-192.png" alt="WhatsApp Scheduler" class="update-app-logo" width="48" height="48" />
+            </div>
+            <div class="update-text">
+              <div class="update-title">
+                <span id="updateTitleText">New Update Available</span>
+                <span class="update-version-tag" id="updateVersionTag">v1.0.10</span>
               </div>
-              <div class="update-progress-labels">
-                <span id="updateProgressPercent">0%</span>
-                <span id="updateProgressBytes">0 MB / 0 MB</span>
-              </div>
+              <div class="update-desc" id="updateNotes">New WhatsApp Scheduler Update</div>
             </div>
           </div>
+          <div class="update-actions" id="updateActions">
+            <button type="button" class="btn-update-dismiss" id="updateDismissBtn">Later</button>
+            <button type="button" class="btn-update-now" id="updateNowBtn">
+              <span id="updateNowIconWrap" style="display: inline-flex; align-items: center;">
+                <svg id="updateNowIcon" class="update-now-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" x2="12" y1="15" y2="3"/>
+                </svg>
+              </span>
+              <span id="updateNowText">Update</span>
+            </button>
+          </div>
         </div>
-        <div class="update-actions" id="updateActions">
-          <button type="button" class="btn-update-dismiss" id="updateDismissBtn">Later</button>
-          <button type="button" class="btn-update-now" id="updateNowBtn" style="display: inline-flex; align-items: center; gap: 6px;">
-            <svg id="updateNowIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-            <span id="updateNowText">Update</span>
-          </button>
+
+        <div class="update-progress-wrap" id="updateProgressWrap" style="display: none;">
+          <div class="update-progress-bar update-progress-track">
+            <div class="update-progress-fill" id="updateProgressFill" style="width: 0%;"></div>
+          </div>
+          <div class="update-progress-labels">
+            <span class="progress-lbl-pct" id="updateProgressPercent">0%</span>
+            <span class="progress-lbl-status">
+              <span class="downloading-pulse-dot" id="updateProgressDot"></span>
+              <span id="updateProgressStatusText">Downloading APK…</span>
+            </span>
+            <span class="progress-lbl-bytes" id="updateProgressBytes">Starting download…</span>
+          </div>
         </div>
       </div>
 
@@ -97,9 +122,161 @@
         <button type="button" class="share-dismiss" id="shareDismiss" aria-label="Close" style="display: inline-flex; align-items: center; justify-content: center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
       </div>
 
-      <!-- Tab 1: Schedule Form -->
+      <!-- Tab 1: Schedule Form & Fintech Home -->
       <section class="tab-pane active" id="paneSchedule">
+        <!-- WhatsApp Chat Preview Mockup (Replaces Cards with Live Interactive Chat UI) -->
+        <div class="wa-chat-mockup-frame" id="heroFrontCard">
+          <!-- WhatsApp Chat Header Bar -->
+          <div class="wa-chat-header">
+            <div class="wa-chat-header-left">
+              <div class="wa-back-chevron">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m15 18-6-6 6-6"/>
+                </svg>
+              </div>
+              <div class="wa-avatar-wrap">
+                <div class="wa-avatar-img">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12c0 1.82.49 3.53 1.34 5L2 22l5.16-1.32C8.6 21.48 10.25 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18.2c-1.57 0-3.04-.44-4.3-1.2l-.31-.18-3.18.82.85-3.08-.2-.33A8.17 8.17 0 0 1 3.8 12c0-4.52 3.68-8.2 8.2-8.2 4.52 0 8.2 3.68 8.2 8.2 0 4.52-3.68 8.2-8.2 8.2z"/>
+                  </svg>
+                </div>
+                <span class="wa-online-dot" id="heroCardAvatarDot"></span>
+              </div>
+              <div class="wa-chat-titles">
+                <div class="wa-chat-name" id="heroCardUsername">WhatsApp Scheduler</div>
+                <div class="wa-chat-status-line">
+                  <span class="wa-live-badge" id="heroCardStatusText">
+                    <span class="live-pulse-dot disconnected" id="heroCardLiveDot"></span>
+                    <span id="heroCardStatusLabel">Disconnected</span>
+                  </span>
+                  <span class="wa-status-separator" id="heroCardStatusSep" style="display: none;">•</span>
+                  <span class="wa-status-text" id="heroCardPhone" style="display: none;">WhatsApp Engine</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="wa-chat-header-actions">
+              <span class="wa-queue-counter-pill" id="heroCardQueueCount">0 Pending</span>
+              <span class="wa-header-icon wa-header-call" title="Call">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              </span>
+              <span class="wa-header-icon" title="Video">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+              </span>
+              <span class="wa-header-icon" title="Menu">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+              </span>
+            </div>
+          </div>
+
+          <!-- WhatsApp Chat Canvas / Conversation -->
+          <div class="wa-chat-body">
+            <!-- Encryption Security Banner -->
+            <div class="wa-chat-pill-date">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 4px; opacity: 0.8;"><path d="M12 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm6-9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1V6a5 5 0 0 1 10 0v2h1zm-6-5a3 3 0 0 0-3 3v2h6V6a3 3 0 0 0-3-3z"/></svg>
+              TODAY • MESSAGES ARE END-TO-END ENCRYPTED
+            </div>
+
+            <!-- Incoming Message Bubble (Universal WhatsApp Scheduler prompt) -->
+            <div class="wa-bubble-incoming">
+              <div class="wa-bubble-sender">WhatsApp Assistant</div>
+              <p class="wa-bubble-text">Hey! Don't forget to schedule today's important announcements and reminders ⏰</p>
+              <div class="wa-bubble-meta">
+                <span class="wa-bubble-time">9:00 AM</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom WhatsApp Chat Input Bar (Interactive Action Trigger) -->
+          <div class="wa-chat-composer-bar">
+            <div class="wa-composer-btn" aria-label="Emoji">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            </div>
+            <button type="button" class="wa-composer-input-fake" id="btnHeroAddSchedule" title="Click to schedule new message">
+              <span>Schedule a message…</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <button type="button" class="wa-composer-send-btn" aria-label="Quick Action" onclick="document.getElementById('recipientInput')?.focus()">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 Circular Quick Action Buttons (Send, Request, TopUp, More) -->
+        <div class="fintech-actions-grid">
+          <button type="button" class="fintech-action-btn" id="quickActionSend" title="Compose Schedule">
+            <div class="action-circle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="7" y1="17" x2="17" y2="7"></line>
+                <polyline points="7 7 17 7 17 17"></polyline>
+              </svg>
+            </div>
+            <span class="action-caption">Send</span>
+          </button>
+
+          <button type="button" class="fintech-action-btn" id="quickActionRequest" title="Link via 8-Digit Pairing Code">
+            <div class="action-circle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="17" y1="7" x2="7" y2="17"></line>
+                <polyline points="17 17 7 17 7 7"></polyline>
+              </svg>
+            </div>
+            <span class="action-caption">Pair Code</span>
+          </button>
+
+          <button type="button" class="fintech-action-btn" id="quickActionQr" title="Scan QR Code">
+            <div class="action-circle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="6" height="6" x="3" y="3" rx="1.5"></rect>
+                <rect width="6" height="6" x="15" y="3" rx="1.5"></rect>
+                <rect width="6" height="6" x="3" y="15" rx="1.5"></rect>
+                <path d="M15 15h2v2h-2z"></path>
+                <path d="M19 19h2v2h-2z"></path>
+                <path d="M15 19v2"></path>
+                <path d="M19 15v2"></path>
+              </svg>
+            </div>
+            <span class="action-caption">Scan QR</span>
+          </button>
+
+          <button type="button" class="fintech-action-btn" id="quickActionMore" title="View Queue & History">
+            <div class="action-circle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="2"></rect>
+                <rect x="14" y="3" width="7" height="7" rx="2"></rect>
+                <rect x="14" y="14" width="7" height="7" rx="2"></rect>
+                <rect x="3" y="14" width="7" height="7" rx="2"></rect>
+              </svg>
+            </div>
+            <span class="action-caption">More</span>
+          </button>
+        </div>
+
+        <!-- Section: Upcoming Schedules (Manage Expenses style from video) -->
+        <div class="fintech-section-block">
+          <div class="fintech-section-head">
+            <h2 class="fintech-section-title">Upcoming Schedules</h2>
+            <button type="button" class="fintech-view-all-link" id="btnViewAllQueue">View All</button>
+          </div>
+          <div class="fintech-list" id="homeUpcomingList">
+            <div class="fintech-item-empty">
+              <span class="empty-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+              <div class="empty-text">No pending messages in queue</div>
+              <button type="button" class="btn-subtle-add" id="btnEmptyAdd">Create First Schedule</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Schedule Form -->
         <form id="scheduleForm" class="schedule-card">
+          <div class="schedule-form-head">
+            <h2 class="schedule-form-title">New Schedule</h2>
+            <p class="schedule-form-sub">Set up a message to send automatically.</p>
+          </div>
+
           <!-- WhatsApp Disconnected / Setup Banner -->
           <div class="wa-not-connected-card" id="waNotConnectedCard">
             <div class="wa-card-header">
@@ -381,18 +558,18 @@
       </section>
     </main>
 
-    <!-- Bottom Navigation Bar -->
+    <!-- Bottom Navigation Bar: Floating Island Dock -->
     <nav class="bottom-nav">
-      <button type="button" class="nav-item active" data-tab="paneSchedule">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9.5"></circle>
-          <polyline points="12 6.5 12 12 15.5 14"></polyline>
+      <button type="button" class="nav-item active" data-tab="paneSchedule" title="Home">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
         </svg>
-        <span>Schedule</span>
+        <span>Home</span>
       </button>
 
-      <button type="button" class="nav-item" data-tab="paneQueue">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="nav-item" data-tab="paneQueue" title="Queue & History">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"></line>
           <line x1="8" y1="12" x2="21" y2="12"></line>
           <line x1="8" y1="18" x2="21" y2="18"></line>
@@ -403,16 +580,16 @@
         <span>Queue</span>
       </button>
 
-      <button type="button" class="nav-item" data-tab="paneDevice">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="nav-item" data-tab="paneDevice" title="Devices & Account">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
           <line x1="12" y1="18" x2="12.01" y2="18"></line>
         </svg>
-        <span>Device Link</span>
+        <span>Devices</span>
       </button>
 
-      <button type="button" class="nav-item" id="navItemAdmin" data-tab="paneAdmin" style="display: none;">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="nav-item" id="navItemAdmin" data-tab="paneAdmin" style="display: none;" title="Admin Console">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
           <path d="m9 12 2 2 4-4"></path>
         </svg>
