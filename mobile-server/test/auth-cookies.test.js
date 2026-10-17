@@ -14,7 +14,8 @@ let BASE_URL = process.env.TEST_SERVER_URL || "http://127.0.0.1:3000";
 
 function makeRawRequest(method, path, headers = {}, body = null) {
   return new Promise((resolve, reject) => {
-    const url = new URL(path, BASE_URL);
+    const activeBase = process.env.TEST_SERVER_URL || BASE_URL;
+    const url = new URL(path, activeBase);
     const reqHeaders = { ...headers };
     let reqBody = null;
 
@@ -105,6 +106,9 @@ async function runAuthCookieTests() {
   let adminReg;
 
   try {
+    const { loginLimiterInstance } = require("../rateLimiter");
+    if (loginLimiterInstance) loginLimiterInstance.reset();
+
     normalReg = await registerUser(testUser, testPass);
     adminReg = await registerUser(adminUser, adminPass);
     await run("UPDATE users SET role = 'admin' WHERE id = ?", [adminReg.user.id]);
