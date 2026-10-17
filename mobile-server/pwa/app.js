@@ -2479,6 +2479,20 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  // Dismiss App Splash Screen smoothly (DailyFlutterUI style transition)
+  function dismissSplashScreen() {
+    const splash = document.getElementById("appSplashScreen");
+    if (!splash) return;
+    if (splash.classList.contains("splash-exit")) return;
+    splash.classList.add("splash-exit");
+    setTimeout(() => {
+      splash.style.display = "none";
+    }, 600);
+  }
+
+  // Allow 1.6s for full fluid entrance and progress bar reveal
+  setTimeout(dismissSplashScreen, 1600);
+
   setTimeout(checkForUpdates, 1500);
   setInterval(checkForUpdates, 30000);
 });
