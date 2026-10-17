@@ -1484,11 +1484,21 @@ document.addEventListener("DOMContentLoaded", () => {
   checkStatus();
   statusPollInterval = setInterval(checkStatus, 3000);
 
-  // 12. Show QR Code Modal Handler
   async function fetchQrNow() {
     try {
       const res = await authFetch("/api/qr");
       const data = await res.json();
+      if (!res.ok && data.error) {
+        if (qrImg) {
+          qrImg.style.display = "none";
+          qrImg.src = "";
+        }
+        if (qrSpinner) {
+          qrSpinner.style.display = "flex";
+          if (qrStatusText) qrStatusText.textContent = data.error;
+        }
+        return;
+      }
       if (data.qr) {
         if (qrImg) {
           qrImg.src = data.qr;
@@ -1496,6 +1506,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (qrSpinner) qrSpinner.style.display = "none";
       } else if (data.connected) {
+        if (qrImg) {
+          qrImg.style.display = "none";
+          qrImg.src = "";
+        }
         if (qrSpinner) {
           qrSpinner.style.display = "flex";
           if (qrStatusText) qrStatusText.textContent = "✓ Already Connected!";
@@ -1507,7 +1521,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     } catch (_) {
-      if (qrSpinner && qrStatusText) qrStatusText.textContent = "Failed to load QR code.";
+      if (qrImg) {
+        qrImg.style.display = "none";
+        qrImg.src = "";
+      }
+      if (qrSpinner) {
+        qrSpinner.style.display = "flex";
+        if (qrStatusText) qrStatusText.textContent = "Failed to load QR code.";
+      }
     }
   }
 

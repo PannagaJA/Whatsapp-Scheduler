@@ -175,6 +175,43 @@ async function runAuditFixesTests() {
       await closeAndCleanupUserSession(testUserId);
     });
 
+    await test("Unconfirmed pairing code credentials do not poison subsequent QR generation or pairing retries", async () => {
+      const testUserId = crypto.randomUUID();
+      const session = getOrCreateUserSession(testUserId);
+
+      // Simulate a pairing code having been generated but unconfirmed on disk
+      await session.init(true);
+      session.sock.authState.creds.pairingCode = "12345678";
+      session.sock.authState.creds.me = { id: "919876543210@s.whatsapp.net", name: "~" };
+      session.sock.authState.creds.registered = false;
+      const { writeEncryptedJson, getSessionEncryptionKey } = require("../sessionCrypto");
+      const credsFile = path.join(session.authDir, "creds.json");
+      writeEncryptedJson(credsFile, session.sock.authState.creds, getSessionEncryptionKey());
+
+      // End the socket to simulate fresh session startup / reload
+      if (session.sock) {
+        try { session.sock.end(); } catch (_) {}
+        session.sock = null;
+      }
+      session.connectionStatus = "disconnected";
+      session.currentQr = null;
+
+      // Force a genuinely new initialization
+      await session.init(true);
+
+      // Assert that me and pairingCode are absent from both reloaded and persisted credentials
+      assert.strictEqual(session.sock.authState.creds.registered, false);
+      assert.strictEqual(session.sock.authState.creds.me, undefined, "creds.me must be absent from reloaded credentials");
+      assert.strictEqual(session.sock.authState.creds.pairingCode, undefined, "creds.pairingCode must be absent from reloaded credentials");
+
+      const { readDecryptedJson } = require("../sessionCrypto");
+      const persistedCreds = readDecryptedJson(credsFile, getSessionEncryptionKey());
+      assert.strictEqual(persistedCreds.me, undefined, "creds.me must be absent from persisted credentials");
+      assert.strictEqual(persistedCreds.pairingCode, undefined, "creds.pairingCode must be absent from persisted credentials");
+
+      await closeAndCleanupUserSession(testUserId);
+    });
+
     // -------------------------------------------------------------
     // PART 2: Malformed Password Hash Handling
     // -------------------------------------------------------------

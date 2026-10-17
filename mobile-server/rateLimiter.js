@@ -100,11 +100,12 @@ const contactImportLimiter = new SlidingWindowRateLimiter({
   keyGenerator: (req) => (req.user?.id ? `user_${req.user.id}` : req.ip)
 });
 
-// 5. General API Limiter (300 requests / 15 mins)
+// 5. General API Limiter (1500 requests / 15 mins)
 const generalApiLimiter = new SlidingWindowRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 300,
-  message: "API rate limit exceeded. Please try again later."
+  max: 1500,
+  message: "API rate limit exceeded. Please try again later.",
+  keyGenerator: (req) => (req.user?.id ? `user_${req.user.id}` : req.ip)
 });
 
 module.exports = {
