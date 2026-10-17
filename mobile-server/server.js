@@ -180,7 +180,7 @@ class BoundedShareCache {
 const shareCache = new BoundedShareCache();
 
 // Strict CORS Middleware (SEC-009)
-const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || process.env.RENDER_EXTERNAL_URL || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000";
+const rawAllowedOrigins = process.env.ALLOWED_ORIGINS || process.env.RENDER_EXTERNAL_URL || "https://my-whatsapp-scheduler.onrender.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001";
 const allowedOriginsSet = new Set(rawAllowedOrigins.split(",").map(o => o.trim().toLowerCase()).filter(Boolean));
 
 app.use((req, res, next) => {

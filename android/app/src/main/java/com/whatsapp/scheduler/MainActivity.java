@@ -300,6 +300,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public void installPendingUpdate() {
+            File downloadsDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+            if (downloadsDir == null) downloadsDir = getCacheDir();
+            File apkFile = new File(downloadsDir, "WhatsApp-Scheduler-update.apk");
+            if (apkFile != null && apkFile.exists()) {
+                runOnUiThread(() -> triggerPackageInstaller(apkFile));
+            }
+        }
+
+        @JavascriptInterface
         public void downloadAndInstallUpdate(final String downloadUrl) {
             // SEC-002: Strict URL and Protocol Whitelist Check
             if (downloadUrl == null || !downloadUrl.startsWith("https://")) {
@@ -497,6 +507,11 @@ public class MainActivity extends AppCompatActivity {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
                 intent.setData(Uri.parse("package:" + getPackageName()));
                 startActivityForResult(intent, INSTALL_PERMISSION_REQ);
+                runOnUiThread(() -> {
+                    if (webView != null) {
+                        webView.evaluateJavascript("if (typeof window.onUpdateDownloadComplete === 'function') window.onUpdateDownloadComplete(false);", null);
+                    }
+                });
                 return;
             }
         }
