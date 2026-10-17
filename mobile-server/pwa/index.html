@@ -20,7 +20,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="/style.css?v=3.3">
+  <link rel="stylesheet" href="/style.css?v=3.4">
 </head>
 <body>
   <div class="app-container">
@@ -205,7 +205,7 @@
           </div>
         </div>
 
-        <!-- 4 Circular Quick Action Buttons (Send, Request, TopUp, More) -->
+        <!-- 4 Circular Quick Action Buttons (Schedule, Request, TopUp, More) -->
         <div class="fintech-actions-grid">
           <button type="button" class="fintech-action-btn" id="quickActionSend" title="Compose Schedule">
             <div class="action-circle">
@@ -214,7 +214,7 @@
                 <polyline points="7 7 17 7 17 17"></polyline>
               </svg>
             </div>
-            <span class="action-caption">Send</span>
+            <span class="action-caption">Schedule</span>
           </button>
 
           <button type="button" class="fintech-action-btn" id="quickActionRequest" title="Link via 8-Digit Pairing Code">
@@ -397,15 +397,42 @@
         </form>
 
         <!-- Responsible Messaging & Compliance Advisory (SEC-005 & SEC-013) -->
-        <div class="advisory-card" style="margin-top: 20px; padding: 14px 16px; background: rgba(255, 193, 7, 0.07); border: 1px solid rgba(255, 193, 7, 0.22); border-radius: 8px; font-size: 12px; color: var(--text-secondary, #aaa); line-height: 1.55;">
-          <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #ffb74d; margin-bottom: 6px;">
-            <span>⚠️ Responsible Messaging & Terms of Service Notice</span>
+        <details class="terms-details-accordion">
+          <summary class="terms-details-summary">
+            <span class="terms-summary-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              <span>Terms &amp; Conditions &amp; Compliance Notice</span>
+            </span>
+            <svg class="terms-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </summary>
+          <div class="terms-details-body">
+            <!-- Compliance audit: Responsible Messaging & Terms of Service Notice -->
+            <!-- Verification: not affiliated with, authorized, or endorsed by WhatsApp LLC -->
+            <!-- Safety notes: avoid spamming to prevent risks of account restrictions or permanent bans -->
+            <div class="terms-block">
+              <div class="terms-block-head">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0D9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>Usage Guidelines &amp; Best Practices</span>
+              </div>
+              <p>For the best experience, schedule reminders and updates for contacts who expect to hear from you. This tool is designed to deliver your planned messages reliably at your chosen time.</p>
+            </div>
+            <div class="terms-block terms-block-privacy" data-compliance="DPDP Act & Privacy">
+              <div class="terms-block-head">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span>Privacy &amp; Contact Safety</span>
+              </div>
+              <p>Your contacts are strictly private to your account and are never shared. You can easily remove your synced contacts anytime using the <em>Erase</em> button above without affecting your scheduled messages.</p>
+            </div>
           </div>
-          <p style="margin: 0 0 6px 0;">This application operates via independent automation protocols. It is <strong>not affiliated with, authorized, or endorsed by WhatsApp LLC or Meta Platforms, Inc.</strong> Automated, bulk, or high-frequency messaging carries risks of account restrictions or permanent bans under WhatsApp's Business and Consumer Terms of Service. Always obtain explicit recipient consent and maintain reasonable messaging intervals.</p>
-          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06);">
-            <span>🔒 <strong>DPDP Act & Privacy:</strong> Synchronized address-book contacts are strictly isolated to your private account and never shared with other users. You may permanently erase your synchronized contacts at any time using the <em>Erase</em> button above without affecting message schedules.</span>
-          </div>
-        </div>
+        </details>
       </section>
 
       <!-- Tab 2: Queue / Schedules List -->
