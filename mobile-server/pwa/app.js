@@ -147,6 +147,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!authModal) return;
     authModal.style.display = "flex";
     authModal.classList.add("active");
+    if (authPasswordInput) authPasswordInput.type = "password";
+    const eyeOpen = document.getElementById("eyeIconOpen");
+    const eyeClosed = document.getElementById("eyeIconClosed");
+    if (eyeOpen) eyeOpen.style.display = "block";
+    if (eyeClosed) eyeClosed.style.display = "none";
     checkAuthSetup();
   }
 
@@ -236,6 +241,19 @@ document.addEventListener("DOMContentLoaded", () => {
       isSetupMode = !isSetupMode;
       if (authErrorMsg) authErrorMsg.style.display = "none";
       updateAuthModalUI();
+    };
+  }
+
+  const btnToggleAuthPassword = document.getElementById("btnToggleAuthPassword");
+  if (btnToggleAuthPassword && authPasswordInput) {
+    btnToggleAuthPassword.onclick = () => {
+      const eyeOpen = document.getElementById("eyeIconOpen");
+      const eyeClosed = document.getElementById("eyeIconClosed");
+      const isPass = authPasswordInput.type === "password";
+      authPasswordInput.type = isPass ? "text" : "password";
+      if (eyeOpen) eyeOpen.style.display = isPass ? "none" : "block";
+      if (eyeClosed) eyeClosed.style.display = isPass ? "block" : "none";
+      authPasswordInput.focus();
     };
   }
 
@@ -1239,7 +1257,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    const clearHistoryBtn = document.getElementById("btnClearHistoryBtn");
     if (uniqueSchedules.length === 0) {
+      if (clearHistoryBtn) clearHistoryBtn.style.display = "none";
       queueList.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon" style="display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
@@ -1250,6 +1270,26 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       `;
       return;
+    }
+
+    const hasHistorical = uniqueSchedules.some(s => s.status === "sent" || s.status === "failed");
+    if (clearHistoryBtn) {
+      if (hasHistorical) {
+        clearHistoryBtn.style.display = "inline-flex";
+        clearHistoryBtn.onclick = async () => {
+          if (!confirm("Clear all completed and failed message history from the queue?")) return;
+          const toDelete = uniqueSchedules.filter(s => s.status === "sent" || s.status === "failed");
+          try {
+            await Promise.all(toDelete.map(s => authFetch(`/api/schedules/${s.id}`, { method: "DELETE" })));
+            showToast("✓ Message history cleared");
+            loadSchedules();
+          } catch (e) {
+            showToast("Error clearing history");
+          }
+        };
+      } else {
+        clearHistoryBtn.style.display = "none";
+      }
     }
 
     uniqueSchedules.forEach(s => {
@@ -1307,13 +1347,16 @@ document.addEventListener("DOMContentLoaded", () => {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>${dateStr}, ${timeStr}</span>
           </div>
-          ${s.status === "scheduled" || s.status === "retrying" || s.status === "failed" ? `<button class="btn-cancel-schedule" data-id="${s.id}" style="display: inline-flex; align-items: center; gap: 4px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>Cancel</span></button>` : ""}
+          <button type="button" class="btn-delete-schedule" data-id="${s.id}" title="Delete scheduled message">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <span>Delete</span>
+          </button>
         </div>
       `;
 
-      const cancelBtn = card.querySelector(".btn-cancel-schedule");
-      if (cancelBtn) {
-        cancelBtn.onclick = () => deleteSchedule(s.id);
+      const delBtn = card.querySelector(".btn-delete-schedule");
+      if (delBtn) {
+        delBtn.onclick = () => deleteSchedule(s.id);
       }
 
       queueList.appendChild(card);
@@ -2350,6 +2393,20 @@ document.addEventListener("DOMContentLoaded", () => {
     btnRefreshAdminUsers.addEventListener("click", () => {
       loadAdminUsers();
     });
+  }
+
+  const btnToggleAdminPassword = document.getElementById("btnToggleAdminPassword");
+  const adminNewPasswordInput = document.getElementById("adminNewPassword");
+  if (btnToggleAdminPassword && adminNewPasswordInput) {
+    btnToggleAdminPassword.onclick = () => {
+      const eyeOpen = btnToggleAdminPassword.querySelector(".eye-open");
+      const eyeClosed = btnToggleAdminPassword.querySelector(".eye-closed");
+      const isPass = adminNewPasswordInput.type === "password";
+      adminNewPasswordInput.type = isPass ? "text" : "password";
+      if (eyeOpen) eyeOpen.style.display = isPass ? "none" : "block";
+      if (eyeClosed) eyeClosed.style.display = isPass ? "block" : "none";
+      adminNewPasswordInput.focus();
+    };
   }
 
   setTimeout(checkForUpdates, 1500);
