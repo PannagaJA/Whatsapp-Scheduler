@@ -82,6 +82,9 @@ async function runMultiUserRegressionTests() {
   const port = server.address().port;
   const BASE_URL = `http://127.0.0.1:${port}`;
 
+  let aliceId = null;
+  let bobId = null;
+
   try {
     const ts = Date.now().toString(36);
     const aliceUsername = `alice_${ts}`;
@@ -90,9 +93,7 @@ async function runMultiUserRegressionTests() {
     const bobPassword = "BobSecurePass123!";
 
     let aliceToken = null;
-    let aliceId = null;
     let bobToken = null;
-    let bobId = null;
 
     // --- TEST 1: Independent Registration and Authentication ---
     console.log("🔐 [1] Independent User Registration & Authentication Flow:");
@@ -356,6 +357,22 @@ async function runMultiUserRegressionTests() {
       process.exit(1);
     }
   } finally {
+    try {
+      if (aliceId) {
+        await run("DELETE FROM schedules WHERE user_id = ?", [aliceId]);
+        await run("DELETE FROM contacts WHERE user_id = ?", [aliceId]);
+        await run("DELETE FROM settings WHERE user_id = ?", [aliceId]);
+        await run("DELETE FROM sessions WHERE user_id = ?", [aliceId]);
+        await run("DELETE FROM users WHERE id = ?", [aliceId]);
+      }
+      if (bobId) {
+        await run("DELETE FROM schedules WHERE user_id = ?", [bobId]);
+        await run("DELETE FROM contacts WHERE user_id = ?", [bobId]);
+        await run("DELETE FROM settings WHERE user_id = ?", [bobId]);
+        await run("DELETE FROM sessions WHERE user_id = ?", [bobId]);
+        await run("DELETE FROM users WHERE id = ?", [bobId]);
+      }
+    } catch (_) {}
     await new Promise((resolve) => server.close(resolve));
   }
 }
