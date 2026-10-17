@@ -87,7 +87,7 @@ body {
   background: rgba(245, 247, 251, 0.94);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  padding: calc(14px + env(safe-area-inset-top)) 20px 10px;
+  padding: calc(14px + max(env(safe-area-inset-top, 0px), var(--safe-area-top-fallback, 0px))) 20px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -211,7 +211,7 @@ body {
    ========================================================================== */
 .app-main {
   flex: 1;
-  padding: 10px 18px 100px;
+  padding: 10px 18px calc(100px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-bottom-fallback, 0px)));
   display: flex;
   flex-direction: column;
 }
@@ -1628,7 +1628,7 @@ textarea {
 }
 
 .refresh-btn:hover {
-  background: var(--bg-surface);
+  background: var(--bg-card-secondary);
 }
 
 .queue-list {
@@ -1723,7 +1723,7 @@ textarea {
   color: var(--text-main);
   line-height: 1.5;
   word-break: break-word;
-  background: var(--bg-surface);
+  background: var(--bg-card-secondary);
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
@@ -1779,7 +1779,7 @@ textarea {
 
 .btn-toggle-password:hover {
   opacity: 1;
-  color: var(--accent);
+  color: var(--accent-purple);
 }
 
 .empty-state {
@@ -2272,7 +2272,7 @@ textarea {
 .pair-code-display-wrap {
   margin-top: 18px;
   padding: 16px;
-  background: var(--bg-surface, #F8FAFC);
+  background: var(--bg-card-secondary, #F8FAFC);
   border-radius: 14px;
   border: 1px solid var(--border-subtle, #E2E8F0);
   display: flex;
@@ -2403,7 +2403,7 @@ textarea {
    ========================================================================== */
 .bottom-nav {
   position: fixed;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(16px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-bottom-fallback, 0px)));
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
@@ -2467,7 +2467,7 @@ textarea {
    ========================================================================== */
 .toast {
   position: fixed;
-  bottom: 84px;
+  bottom: calc(84px + max(env(safe-area-inset-bottom, 0px), var(--safe-area-bottom-fallback, 0px)));
   left: 50%;
   transform: translateX(-50%) translateY(20px);
   background: #111827;
