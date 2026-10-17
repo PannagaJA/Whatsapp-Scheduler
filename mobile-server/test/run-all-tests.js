@@ -1,3 +1,6 @@
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+process.env.TEST_PORT = process.env.TEST_PORT || "3001";
+process.env.TEST_SERVER_URL = process.env.TEST_SERVER_URL || `http://127.0.0.1:${process.env.TEST_PORT}`;
 const http = require("http");
 const app = require("../server");
 const { runSecurityPhase1Tests } = require("./security-phase1.test");
@@ -17,8 +20,9 @@ async function main() {
   console.log("=================================================================\n");
 
   let server = null;
-  const targetPort = 3000;
+  const targetPort = process.env.TEST_PORT || 3001;
   const testUrl = `http://127.0.0.1:${targetPort}`;
+  process.env.TEST_SERVER_URL = testUrl;
 
   // Check if a server is already listening on port 3000
   const isServerRunning = await new Promise((resolve) => {
@@ -44,6 +48,11 @@ async function main() {
   }
 
   process.env.TEST_SERVER_URL = testUrl;
+
+  const { loginLimiterInstance, registerLimiterInstance, pairingLimiterInstance } = require("../rateLimiter");
+  if (loginLimiterInstance) loginLimiterInstance.reset();
+  if (registerLimiterInstance) registerLimiterInstance.reset();
+  if (pairingLimiterInstance) pairingLimiterInstance.reset();
 
   try {
     console.log("\n▶️ RUNNING PHASE 1 SUITE...");
