@@ -39,6 +39,7 @@ class UserWhatsAppSession {
     this.isDestroyed = false;
     this._isInitializing = false;
     this._initPromise = null;
+    this._lastInitError = null;
     this.authDir = path.join(SESSIONS_BASE_DIR, userId, "auth_info_baileys");
   }
 
@@ -80,6 +81,7 @@ class UserWhatsAppSession {
     }
     if (force) {
       this.isExplicitlyLoggedOut = false;
+      this._lastInitError = null;
     } else if (this.isExplicitlyLoggedOut) {
       return null;
     }
@@ -372,6 +374,8 @@ class UserWhatsAppSession {
         return this.sock;
       } catch (err) {
         console.error(`[WhatsApp Engine ${this.userId}] Initialization error:`, err.message);
+        this._lastInitError = err;
+        this.connectionStatus = "disconnected";
         return null;
       } finally {
         this._isInitializing = false;
@@ -430,6 +434,7 @@ class UserWhatsAppSession {
       phonebookContactCount: phonebookCount,
       phonebookImported: phonebookImported && phonebookCount > 0,
       qr: this.currentQr,
+      error: this._lastInitError ? this._lastInitError.message : null,
       user: this.userProfile ? {
         id: this.userProfile.id,
         name: this.userProfile.name || this.userProfile.id?.split(":")[0] || "My WhatsApp"
@@ -566,8 +571,15 @@ class UserWhatsAppSession {
       await this.init(true);
     }
 
+    const getInitErrorMessage = () => {
+      if (this._lastInitError?.message) {
+        return `WhatsApp engine not initialized for this account: ${this._lastInitError.message}`;
+      }
+      return "WhatsApp engine not initialized for this account.";
+    };
+
     if (!this.sock) {
-      throw new Error("WhatsApp engine not initialized for this account.");
+      throw new Error(getInitErrorMessage());
     }
 
     // Wait until the socket is ready for companion pairing (registration handshake complete)
@@ -576,13 +588,13 @@ class UserWhatsAppSession {
     } catch (_) {
       await this.init(true);
       if (!this.sock) {
-        throw new Error("WhatsApp engine not initialized for this account.");
+        throw new Error(getInitErrorMessage());
       }
       await this.waitForSocketReadyForPairing(15000);
     }
 
     if (!this.sock) {
-      throw new Error("WhatsApp engine not initialized for this account.");
+      throw new Error(getInitErrorMessage());
     }
 
     if (this.sock.authState?.creds?.registered) {

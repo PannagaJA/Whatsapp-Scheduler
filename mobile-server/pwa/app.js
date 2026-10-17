@@ -1463,7 +1463,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (qrModal && qrModal.classList.contains("active")) {
-          if (data.qr) {
+          if (data.error) {
+            if (qrImg) {
+              qrImg.style.display = "none";
+              qrImg.src = "";
+            }
+            if (qrSpinner) {
+              qrSpinner.style.display = "flex";
+              if (qrStatusText) qrStatusText.textContent = data.error;
+            }
+          } else if (data.qr) {
             if (qrImg) {
               qrImg.src = data.qr;
               qrImg.style.display = "block";
@@ -1488,7 +1497,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await authFetch("/api/qr");
       const data = await res.json();
-      if (!res.ok && data.error) {
+      if (data.error) {
         if (qrImg) {
           qrImg.style.display = "none";
           qrImg.src = "";

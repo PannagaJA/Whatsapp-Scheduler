@@ -212,6 +212,31 @@ async function runAuditFixesTests() {
       await closeAndCleanupUserSession(testUserId);
     });
 
+    await test("Initialization error is captured in _lastInitError and propagated to getStatus and requestPairingCode", async () => {
+      const testUserId = crypto.randomUUID();
+      const session = getOrCreateUserSession(testUserId);
+
+      session.init = async () => {
+        session._lastInitError = new Error("PRODUCTION CONFIG ERROR: SESSION_ENCRYPTION_KEY must be set in production");
+        session.sock = null;
+        return null;
+      };
+      session.sock = null;
+      session._lastInitError = new Error("PRODUCTION CONFIG ERROR: SESSION_ENCRYPTION_KEY must be set in production");
+
+      const status = await session.getStatus();
+      assert.strictEqual(status.error, "PRODUCTION CONFIG ERROR: SESSION_ENCRYPTION_KEY must be set in production");
+
+      await assert.rejects(
+        async () => {
+          await session.requestPairingCode("919876543210");
+        },
+        /WhatsApp engine not initialized for this account: PRODUCTION CONFIG ERROR: SESSION_ENCRYPTION_KEY must be set in production/
+      );
+
+      await closeAndCleanupUserSession(testUserId);
+    });
+
     // -------------------------------------------------------------
     // PART 2: Malformed Password Hash Handling
     // -------------------------------------------------------------

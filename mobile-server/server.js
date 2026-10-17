@@ -454,7 +454,8 @@ app.get("/api/qr", requireAuth, async (req, res) => {
       success: true, 
       qr: status.qr || null, 
       status: status.status, 
-      connected: status.status === "connected" 
+      connected: status.status === "connected",
+      error: status.error || null
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
