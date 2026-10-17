@@ -89,10 +89,15 @@ document.addEventListener("DOMContentLoaded", () => {
   const currentUserRoleText = document.getElementById("currentUserRoleText");
   const btnSignOutApp = document.getElementById("btnSignOutApp");
 
-  // State
-  let authToken = localStorage.getItem("wa_auth_token") || "";
+  // State: secure cookie-based authentication with CSRF tokens
+  let authGeneration = 0;
   let csrfToken = "";
   let currentUser = null;
+  try {
+    localStorage.removeItem("wa_auth_token");
+    const cachedUser = localStorage.getItem("wa_current_user");
+    if (cachedUser) currentUser = JSON.parse(cachedUser);
+  } catch (_) {}
   let isSetupMode = false;
   let isInitialSetup = false;
   let allowRegistration = true;
@@ -113,6 +118,8 @@ document.addEventListener("DOMContentLoaded", () => {
     return "";
   }
 
+  let isVerifying401 = false;
+
   async function authFetch(url, options = {}) {
     options.headers = options.headers || {};
     options.credentials = "include"; // Send HttpOnly session cookies
@@ -127,18 +134,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    if (authToken) {
-      if (options.headers instanceof Headers) {
-        options.headers.set("Authorization", `Bearer ${authToken}`);
-      } else {
-        options.headers["Authorization"] = `Bearer ${authToken}`;
-      }
-    }
-
     try {
       const res = await fetch(url, options);
       if (res.status === 401 && !url.includes("/api/auth/")) {
-        showAuthModal();
+        // If a request returns 401, verify session via /api/auth/me before abruptly popping the sign-in modal
+        if (!isVerifying401) {
+          isVerifying401 = true;
+          verifyInitialAuth(1).finally(() => {
+            isVerifying401 = false;
+          });
+        }
       }
       return res;
     } catch (err) {
@@ -175,23 +180,23 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateCurrentUserDisplay() {
-    if (currentUsernameText && currentUser) {
-      currentUsernameText.textContent = currentUser.username || "User";
+    if (currentUsernameText) {
+      currentUsernameText.textContent = (currentUser && currentUser.username) ? currentUser.username : "Guest";
     }
-    if (currentUserRoleText && currentUser) {
-      currentUserRoleText.textContent = (currentUser.role === "admin") ? "Administrator 👑" : "User";
+    if (currentUserRoleText) {
+      currentUserRoleText.textContent = (currentUser && currentUser.role === "admin") ? "Administrator 👑" : "User";
     }
     const heroGreetingName = document.getElementById("heroGreetingName");
-    if (heroGreetingName && currentUser) {
-      heroGreetingName.textContent = currentUser.username || "there";
+    if (heroGreetingName) {
+      heroGreetingName.textContent = (currentUser && currentUser.username) ? currentUser.username : "there";
     }
     const heroCardUsername = document.getElementById("heroCardUsername");
-    if (heroCardUsername && currentUser) {
-      heroCardUsername.textContent = currentUser.username || "Account";
+    if (heroCardUsername) {
+      heroCardUsername.textContent = (currentUser && currentUser.username) ? currentUser.username : "Account";
     }
     const headerAvatarInitial = document.getElementById("headerAvatarInitial");
-    if (headerAvatarInitial && currentUser && currentUser.username) {
-      headerAvatarInitial.textContent = currentUser.username.charAt(0).toUpperCase();
+    if (headerAvatarInitial) {
+      headerAvatarInitial.textContent = (currentUser && currentUser.username) ? currentUser.username.charAt(0).toUpperCase() : "U";
     }
     const navItemAdmin = document.getElementById("navItemAdmin");
     if (navItemAdmin) {
@@ -199,7 +204,8 @@ document.addEventListener("DOMContentLoaded", () => {
         navItemAdmin.style.display = "flex";
       } else {
         navItemAdmin.style.display = "none";
-        const currentActive = localStorage.getItem("wa_active_tab");
+        let currentActive = "";
+        try { currentActive = localStorage.getItem("wa_active_tab"); } catch (_) {}
         if (currentActive === "paneAdmin") {
           switchTab("paneSchedule");
         }
@@ -335,11 +341,13 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         const data = await res.json();
         if (data.success) {
+          authGeneration++;
           currentUser = data.user || { username, role: "user" };
           if (data.csrfToken) csrfToken = data.csrfToken;
-          authToken = data.token || "";
-          // Secure transition: clear legacy token from localStorage once session cookie is established
-          try { localStorage.removeItem("wa_auth_token"); } catch (_) {}
+          try {
+            localStorage.removeItem("wa_auth_token");
+            if (currentUser) localStorage.setItem("wa_current_user", JSON.stringify(currentUser));
+          } catch (_) {}
           hideAuthModal();
           updateCurrentUserDisplay();
           showToast(`✓ Welcome, ${escapeHtml(currentUser.username)}!`);
@@ -378,43 +386,100 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnSignOutApp) {
     btnSignOutApp.onclick = async () => {
       if (!confirm("Are you sure you want to sign out of this application account?")) return;
+      authGeneration++;
       try {
         await authFetch("/api/auth/logout", { method: "POST" });
       } catch (_) {}
-      authToken = "";
       csrfToken = "";
       currentUser = null;
-      localStorage.removeItem("wa_auth_token");
-      localStorage.removeItem("wa_phonebook_synced");
+      try {
+        localStorage.removeItem("wa_auth_token");
+        localStorage.removeItem("wa_current_user");
+        localStorage.removeItem("wa_phonebook_synced");
+      } catch (_) {}
+      updateCurrentUserDisplay();
       showToast("Signed out of application");
       showAuthModal();
     };
   }
 
-  // Initial Auth Verification (Supports seamless transition from localStorage to HttpOnly cookie)
-  async function verifyInitialAuth() {
+  // Resilient Auth Verification across server restarts, reboots & network reconnection
+  let isVerifyingAuth = false;
+  let authRetryTimer = null;
+
+  async function verifyInitialAuth(attempt = 1) {
+    if (isVerifyingAuth && attempt === 1) return;
+    isVerifyingAuth = true;
+    const capturedGen = ++authGeneration;
+
     try {
-      const headers = {};
-      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
       const res = await fetch("/api/auth/me", {
-        headers,
         credentials: "include"
       });
+
+      if (capturedGen !== authGeneration) return;
+
       if (res.ok) {
         const data = await res.json();
+        if (capturedGen !== authGeneration) return;
         if (data?.user) {
           currentUser = data.user;
           if (data.csrfToken) csrfToken = data.csrfToken;
-          // Session cookie verified; purge legacy localStorage token
-          try { localStorage.removeItem("wa_auth_token"); } catch (_) {}
-          authToken = "";
+          try {
+            localStorage.removeItem("wa_auth_token");
+            if (currentUser) localStorage.setItem("wa_current_user", JSON.stringify(currentUser));
+          } catch (_) {}
           updateCurrentUserDisplay();
+          hideAuthModal();
           return;
         }
       }
-      showAuthModal();
+
+      if (res.status === 401) {
+        if (capturedGen !== authGeneration) return;
+        authGeneration++;
+        currentUser = null;
+        csrfToken = "";
+        try {
+          localStorage.removeItem("wa_auth_token");
+          localStorage.removeItem("wa_current_user");
+        } catch (_) {}
+        updateCurrentUserDisplay();
+        showAuthModal();
+        return;
+      }
+
+      // Backend server error (502/503/504/500) during reboot or reload: retry with backoff
+      if (res.status >= 500 && attempt < 5) {
+        if (capturedGen !== authGeneration) return;
+        const delay = Math.min(1000 * Math.pow(1.5, attempt), 5000);
+        clearTimeout(authRetryTimer);
+        authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
+        return;
+      }
+
+      if (capturedGen !== authGeneration) return;
+      // Only show auth modal if user has never logged in (no cached credentials)
+      if (!currentUser) {
+        showAuthModal();
+      }
     } catch (_) {
-      showAuthModal();
+      if (capturedGen !== authGeneration) return;
+      // Network error (server restarting, waking up, or offline): retry with backoff
+      if (attempt < 5) {
+        const delay = Math.min(1000 * Math.pow(1.5, attempt), 5000);
+        clearTimeout(authRetryTimer);
+        authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
+        return;
+      }
+
+      if (capturedGen !== authGeneration) return;
+      // If network error persists and we have no stored user, show modal
+      if (!currentUser) {
+        showAuthModal();
+      }
+    } finally {
+      isVerifyingAuth = false;
     }
   }
   verifyInitialAuth();
