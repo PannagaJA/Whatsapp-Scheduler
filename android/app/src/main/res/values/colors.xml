@@ -3,4 +3,5 @@
     <color name="primary_dark">#128C7E</color>
     <color name="accent">#00A884</color>
     <color name="background">#0b141a</color>
+    <color name="app_background">#F5F7FB</color>
 </resources>
