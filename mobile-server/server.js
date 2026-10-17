@@ -389,13 +389,13 @@ app.get("/api/shared/:shareId", requireAuth, (req, res) => {
   }
 });
 
-// Cache resolved GitHub release for 15 seconds to be ultra fast and bypass rate limits
+// Cache resolved GitHub release for 10 minutes to be fast and avoid rate limits
 let cachedRelease = { version: null, checkedAt: 0 };
 
 // API: App Version & Direct APK Download Info (Public)
 app.get("/api/version", async (req, res) => {
   const now = Date.now();
-  if (cachedRelease.version && (now - cachedRelease.checkedAt < 15000)) {
+  if (cachedRelease.version && (now - cachedRelease.checkedAt < 10 * 60 * 1000)) {
     return res.json({
       success: true,
       version: cachedRelease.version,

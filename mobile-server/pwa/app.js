@@ -618,6 +618,7 @@ document.addEventListener("DOMContentLoaded", () => {
       loadContacts();
     } else if (targetId === "paneDevice") {
       checkStatus();
+      checkForUpdates(true);
     } else if (targetId === "paneAdmin") {
       loadAdminUsers();
     }
@@ -1640,9 +1641,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  const STATUS_POLL_TIMEOUT_MS = 10000;
+
   async function checkStatus() {
+    let timeoutId = null;
     try {
-      const res = await authFetch("/api/status");
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      if (controller) {
+        timeoutId = setTimeout(() => controller.abort(), STATUS_POLL_TIMEOUT_MS);
+      }
+      const res = await authFetch("/api/status", controller ? { signal: controller.signal } : {});
       const data = await res.json();
       
       const isConn = data.status === "connected";
@@ -1802,17 +1810,68 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
       }
+
+      // Adaptive polling delay:
+      // - 2.5s while active in pairing modal or connecting
+      // - 8s once connected (saves 65% network overhead & mobile battery)
+      // - 4s when disconnected
+      const isPairingActive = (qrModal && qrModal.classList.contains("active")) ||
+                              (pairModal && pairModal.classList.contains("active")) ||
+                              isConnecting;
+
+      if (isPairingActive) {
+        currentStatusPollDelay = 2500;
+      } else if (isConn) {
+        currentStatusPollDelay = 8000;
+      } else {
+        currentStatusPollDelay = 4000;
+      }
     } catch (_) {
       if (headerStatus) {
         headerStatus.className = "status-indicator disconnected";
         headerStatus.querySelector(".status-text").textContent = "Offline";
       }
+      currentStatusPollDelay = 6000;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      scheduleNextStatusCheck();
     }
   }
 
-  // Run status check immediately and every 3 seconds
+  let currentStatusPollDelay = 4000;
+
+  function scheduleNextStatusCheck(customDelay) {
+    if (statusPollInterval) {
+      clearTimeout(statusPollInterval);
+      statusPollInterval = null;
+    }
+
+    // In background tabs / minimized app, idle down to 60s to save mobile battery
+    if (document.hidden) {
+      statusPollInterval = setTimeout(checkStatus, 60000);
+      return;
+    }
+
+    const delay = (typeof customDelay === "number") ? customDelay : currentStatusPollDelay;
+    statusPollInterval = setTimeout(checkStatus, delay);
+  }
+
+  // Initial status check
   checkStatus();
-  statusPollInterval = setInterval(checkStatus, 3000);
+
+  // Smart Visibility-Based Refresh:
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      // Tab brought to foreground: immediately refresh status and check updates if stale
+      checkStatus();
+      checkForUpdates();
+    } else {
+      // Tab hidden/minimized: slow down polling to save mobile battery
+      scheduleNextStatusCheck(60000);
+    }
+  });
 
   async function fetchQrNow() {
     try {
@@ -2241,7 +2300,22 @@ document.addEventListener("DOMContentLoaded", () => {
     return false;
   }
 
-  async function checkForUpdates() {
+  let lastUpdateCheckTime = 0;
+  let lastFailedUpdateCheckTime = 0;
+  const UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+  const UPDATE_RETRY_INTERVAL_MS = 60 * 1000; // 1 minute bounded retry on resolution failure
+
+  async function checkForUpdates(force = false) {
+    const now = Date.now();
+    if (!force) {
+      if (lastUpdateCheckTime && (now - lastUpdateCheckTime < UPDATE_CHECK_INTERVAL_MS)) {
+        return;
+      }
+      if (lastFailedUpdateCheckTime && (now - lastFailedUpdateCheckTime < UPDATE_RETRY_INTERVAL_MS)) {
+        return;
+      }
+    }
+
     const currentVersion = (window.AndroidNative && typeof window.AndroidNative.getAppVersionName === "function")
       ? window.AndroidNative.getAppVersionName()
       : "1.0.0";
@@ -2279,6 +2353,13 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
       } catch (_) {}
+    }
+
+    if (latestTag) {
+      lastUpdateCheckTime = Date.now();
+      lastFailedUpdateCheckTime = 0;
+    } else {
+      lastFailedUpdateCheckTime = Date.now();
     }
 
     const hasNewRelease = latestTag && isNewerVersion(latestTag, currentVersion);
@@ -2558,6 +2639,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // Allow 1.6s for full fluid entrance and progress bar reveal
   setTimeout(dismissSplashScreen, 1600);
 
-  setTimeout(checkForUpdates, 1500);
-  setInterval(checkForUpdates, 30000);
+  // Check for updates once on startup, then periodically check cadence every minute
+  setTimeout(() => {
+    checkForUpdates(true);
+    setInterval(() => {
+      if (!document.hidden) {
+        checkForUpdates();
+      }
+    }, 60 * 1000);
+  }, 2500);
 });
