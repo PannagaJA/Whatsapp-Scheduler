@@ -1498,18 +1498,17 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       if (devicePill) {
+        devicePill.style.background = "";
+        devicePill.style.color = "";
         if (isConn) {
-          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#25D366;display:inline-block;"></span><span>Status: Connected ✓</span>`;
-          devicePill.style.background = "rgba(37, 211, 102, 0.15)";
-          devicePill.style.color = "#25D366";
+          devicePill.className = "device-status-pill connected";
+          devicePill.innerHTML = '<span class="dot"></span><span>Status: Connected ✓</span>';
         } else if (isConnecting) {
-          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#ffc107;display:inline-block;"></span><span>Status: Connecting…</span>`;
-          devicePill.style.background = "rgba(255, 193, 7, 0.15)";
-          devicePill.style.color = "#ffc107";
+          devicePill.className = "device-status-pill connecting";
+          devicePill.innerHTML = '<span class="dot"></span><span>Status: Connecting…</span>';
         } else {
-          devicePill.innerHTML = `<span class="dot" style="width:7px;height:7px;border-radius:50%;background:#ff6b6b;display:inline-block;"></span><span>Status: Disconnected</span>`;
-          devicePill.style.background = "rgba(234, 67, 53, 0.15)";
-          devicePill.style.color = "#ff6b6b";
+          devicePill.className = "device-status-pill disconnected";
+          devicePill.innerHTML = '<span class="dot"></span><span>Status: Disconnected</span>';
         }
       }
 
