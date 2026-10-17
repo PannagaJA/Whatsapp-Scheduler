@@ -2048,6 +2048,190 @@ textarea {
   to { transform: scale(1); opacity: 1; }
 }
 
+/* ==========================================================================
+   Sign In & Register Modal Animation & Aesthetics
+   ========================================================================== */
+#authModal.modal-overlay {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+#authModal.modal-overlay.active {
+  display: flex;
+  animation: authOverlayFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes authOverlayFade {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+    -webkit-backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+}
+
+#authModal .modal-card {
+  max-width: 410px;
+  border-radius: 20px;
+  background: var(--bg-card, #FFFFFF);
+  border: 1px solid var(--border-card, rgba(226, 232, 240, 0.9));
+  box-shadow: 0 24px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  padding: 26px 24px 22px;
+  animation: authCardEntrance 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center bottom;
+  position: relative;
+  overflow: hidden;
+}
+
+@keyframes authCardEntrance {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+#authModal .modal-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #10B981, #25D366, #3B82F6, #10B981);
+  background-size: 300% 100%;
+  animation: authShimmerBar 4s linear infinite;
+}
+
+@keyframes authShimmerBar {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+.auth-header-visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.auth-brand-badge {
+  width: 50px;
+  height: 50px;
+  border-radius: 15px;
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  box-shadow: 0 10px 20px -4px rgba(37, 211, 102, 0.4);
+  margin-bottom: 12px;
+  animation: authBadgePulse 3.2s ease-in-out infinite;
+}
+
+@keyframes authBadgePulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 10px 20px -4px rgba(37, 211, 102, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 14px 26px -2px rgba(37, 211, 102, 0.55);
+  }
+}
+
+.auth-modal-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-main);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+}
+
+.auth-modal-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin: 0;
+  max-width: 330px;
+}
+
+.auth-confirm-group {
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.auth-confirm-group.hidden {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0 !important;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+
+.auth-confirm-group.visible {
+  max-height: 90px;
+  opacity: 1;
+  margin-bottom: 16px !important;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.auth-input-field {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.auth-input-field:focus {
+  outline: none;
+  border-color: #25D366 !important;
+  box-shadow: 0 0 0 3.5px rgba(37, 211, 102, 0.18) !important;
+}
+
+#authSubmitBtn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#authSubmitBtn:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+  box-shadow: 0 8px 18px -4px rgba(37, 211, 102, 0.45);
+}
+
+#authSubmitBtn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+#authToggleModeLink {
+  transition: color 0.15s ease, opacity 0.15s ease, transform 0.15s ease;
+  display: inline-block;
+}
+
+#authToggleModeLink:hover {
+  opacity: 0.85;
+  transform: translateY(-0.5px);
+}
+
+@keyframes authShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.auth-shake {
+  animation: authShake 0.35s ease-in-out;
+}
+
 .modal-head {
   display: flex;
   align-items: center;
