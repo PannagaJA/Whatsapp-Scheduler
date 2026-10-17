@@ -20,7 +20,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="/style.css?v=3.2">
+  <link rel="stylesheet" href="/style.css?v=3.3">
 </head>
 <body>
   <div class="app-container">
@@ -657,20 +657,20 @@
           <span>Get 8-Digit Pairing Code</span>
         </button>
 
-        <div id="pairCodeDisplay" style="display: none; margin-top: 18px; text-align: center;">
-          <div style="font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">
+        <div id="pairCodeDisplay" class="pair-code-display-wrap" style="display: none;">
+          <div class="pair-code-top-label">
             Enter Code in WhatsApp
           </div>
-          <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
-            <div id="pairCodeResult" style="font-family: monospace; font-size: 24px; font-weight: 800; letter-spacing: 3px; color: #25D366; background: rgba(37,211,102,0.1); padding: 10px 14px; border-radius: 8px; border: 1px dashed #25D366; flex: 1;">
-              --------
+          <div class="pair-code-action-row">
+            <div class="pair-code-badge">
+              <span id="pairCodeResult" class="pair-code-digits">--------</span>
             </div>
-            <button type="button" id="btnCopyPairCode" class="btn-primary" style="padding: 10px 14px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; height: 48px;" title="Copy Code">
+            <button type="button" id="btnCopyPairCode" class="btn-pair-copy" title="Copy Code">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
               <span>Copy</span>
             </button>
           </div>
-          <p class="modal-help" style="margin-top: 12px;">
+          <p class="modal-help pair-steps-desc">
             Open WhatsApp &gt; <strong>Linked Devices</strong> &gt; <strong>Link with phone number instead</strong> &gt; Enter this code.
           </p>
         </div>
@@ -749,6 +749,6 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <script src="/app.js?v=3.1"></script>
+  <script src="/app.js?v=3.2"></script>
 </body>
 </html>
