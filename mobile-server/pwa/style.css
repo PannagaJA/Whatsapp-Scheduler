@@ -2850,15 +2850,16 @@ textarea {
   animation: splashRippleAnim 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) 0.75s infinite;
 }
 
-/* Floating App Icon (Money Bundle Replacement - Light Theme Badge) */
+/* Floating App Icon - Unified Edge-to-Edge Squircle Badge */
 .splash-icon-card {
   position: relative;
-  width: 96px;
-  height: 96px;
-  border-radius: 26px;
+  width: 90px;
+  height: 90px;
+  border-radius: 24px;
+  overflow: hidden;
   background: #FFFFFF;
   border: 1px solid rgba(226, 232, 240, 0.9);
-  box-shadow: 0 20px 40px rgba(34, 197, 94, 0.24), 0 6px 18px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 16px 36px rgba(34, 197, 94, 0.22), 0 4px 14px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2867,22 +2868,10 @@ textarea {
 }
 
 .splash-icon-img {
-  width: 80px;
-  height: 80px;
-  border-radius: 20px;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.08));
-}
-
-.splash-icon-gloss {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  border-radius: 26px 26px 100px 100px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 100%);
-  pointer-events: none;
+  display: block;
 }
 
 /* Sparkles / Floating Accents */
