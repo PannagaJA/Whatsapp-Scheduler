@@ -279,10 +279,11 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
+  const csrfToken = setAuthCookies(res, req.sessionToken);
   res.json({
     success: true,
     user: req.user,
-    csrfToken: generateCsrfToken(req.sessionToken)
+    csrfToken
   });
 });
 
