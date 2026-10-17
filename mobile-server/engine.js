@@ -127,7 +127,12 @@ class UserWhatsAppSession {
       if (this.sock) {
         const oldSock = this.sock;
         this.sock = null;
-        try { oldSock.end(new Error("Replacing existing socket during init")); } catch (_) {}
+        try {
+          if (oldSock.ev && typeof oldSock.ev.removeAllListeners === "function") {
+            oldSock.ev.removeAllListeners();
+          }
+          oldSock.end(new Error("Replacing existing socket during init"));
+        } catch (_) {}
       }
 
       this.sock = makeWASocket({
@@ -177,25 +182,35 @@ class UserWhatsAppSession {
         if (connection === "close") {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
           const isRestartRequired = statusCode === DisconnectReason.restartRequired; // 515
-          const isLoggedOut = (
-            statusCode === DisconnectReason.loggedOut ||
-            statusCode === DisconnectReason.badSession ||
-            statusCode === DisconnectReason.multideviceMismatch ||
-            statusCode === 401 ||
-            statusCode === 403
-          ) && !isRestartRequired;
+          // Only true loggedOut (401) is treated as a potential phone-side unlink.
+          // badSession (500), multideviceMismatch, 403, 408, 428 are transient network/server glitches and MUST reconnect.
+          const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401) && !isRestartRequired;
           const wasRegistered = Boolean(this.userProfile || currentSock.authState?.creds?.registered);
-          const shouldReconnect = !isLoggedOut || isRestartRequired || !wasRegistered;
 
-          this.connectionStatus = shouldReconnect ? "connecting" : "disconnected";
-          this.currentQr = null;
-          this.userProfile = null;
-          this.isSyncing = false;
-          this.clearReconnectTimer();
-
+          // Retry on unexpected 401 disconnects across server restarts before wiping credentials
           if (isLoggedOut && wasRegistered) {
-            console.log(`[WhatsApp Engine ${this.userId}] WhatsApp unlinked. Resetting auth state...`);
+            this._loggedOutRetryCount = (this._loggedOutRetryCount || 0) + 1;
+            if (this._loggedOutRetryCount < 3) {
+              console.log(`[WhatsApp Engine ${this.userId}] Received disconnect (401). Retrying connection (attempt ${this._loggedOutRetryCount}/3)...`);
+              if (this.sock === currentSock) {
+                this.sock = null;
+              }
+              try { currentSock.end(new Error("Retrying connection after 401")); } catch (_) {}
+              if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
+                this.clearReconnectTimer();
+                this.reconnectTimer = setTimeout(() => {
+                  this.reconnectTimer = null;
+                  if (!this.isDestroyed && !this.isExplicitlyLoggedOut) {
+                    this.init().catch(err => console.error(`[WhatsApp Engine ${this.userId}] Reconnect retry error:`, err.message));
+                  }
+                }, 3000);
+              }
+              return;
+            }
+
+            console.log(`[WhatsApp Engine ${this.userId}] WhatsApp unlinked confirmed. Resetting auth state...`);
             this.isExplicitlyLoggedOut = true;
+            this._loggedOutRetryCount = 0;
             if (this.sock === currentSock) {
               this.sock = null;
             }
@@ -207,8 +222,17 @@ class UserWhatsAppSession {
               await run("INSERT INTO settings (user_id, key, value) VALUES (?, 'phonebook_imported', '0') ON CONFLICT(user_id, key) DO UPDATE SET value = '0'", [this.userId]);
               await run("DELETE FROM contacts WHERE user_id = ?", [this.userId]);
             } catch (_) {}
-            // Explicitly do NOT reconnect automatically when unlinked/logged out
-          } else if (shouldReconnect) {
+            return;
+          }
+
+          const shouldReconnect = !isLoggedOut || isRestartRequired || !wasRegistered;
+          this.connectionStatus = shouldReconnect ? "connecting" : "disconnected";
+          this.currentQr = null;
+          this.userProfile = null;
+          this.isSyncing = false;
+          this.clearReconnectTimer();
+
+          if (shouldReconnect) {
             if (this.sock === currentSock) {
               this.sock = null;
             }
@@ -227,7 +251,15 @@ class UserWhatsAppSession {
           this.connectionStatus = "connected";
           this.currentQr = null;
           this.userProfile = this.sock.user;
+          this._loggedOutRetryCount = 0;
           console.log(`[WhatsApp Engine ${this.userId}] Connected successfully as: ${this.userProfile?.name || this.userProfile?.id}`);
+
+          // Immediately persist confirmed credentials to creds.json on disk
+          try {
+            await saveCreds();
+          } catch (saveErr) {
+            console.error(`[WhatsApp Engine ${this.userId}] Failed persisting creds on connection open:`, saveErr.message);
+          }
 
           // Auto-fetch participating groups
           try {
@@ -814,11 +846,6 @@ function getOrCreateUserSession(userId) {
   if (!userSessions.has(userId)) {
     const session = new UserWhatsAppSession(userId);
     userSessions.set(userId, session);
-    // Only auto-initialize if session has existing credentials on disk
-    const credsFile = path.join(session.authDir, "creds.json");
-    if (fs.existsSync(credsFile)) {
-      session.init().catch(err => console.error(`[WhatsApp Engine ${userId}] Session boot error:`, err.message));
-    }
   }
   return userSessions.get(userId);
 }
@@ -850,22 +877,45 @@ async function migrateLegacyAuthState() {
 async function initAllActiveSessions() {
   try {
     await migrateLegacyAuthState();
-    const users = await all("SELECT id FROM users");
     const encryptionKey = getSessionEncryptionKey();
-    for (const u of users) {
-      const session = getOrCreateUserSession(u.id);
-      try {
-        migrateSessionDirectory(session.authDir, encryptionKey);
-      } catch (migErr) {
-        console.error(`[WhatsApp Engine ${u.id}] Startup migration notice:`, migErr.message);
-      }
-      const credsFile = path.join(session.authDir, "creds.json");
+    if (!fs.existsSync(SESSIONS_BASE_DIR)) return;
+    const sessionUserDirs = fs.readdirSync(SESSIONS_BASE_DIR);
+    for (const userId of sessionUserDirs) {
+      const authDir = path.join(SESSIONS_BASE_DIR, userId, "auth_info_baileys");
+      const credsFile = path.join(authDir, "creds.json");
       if (fs.existsSync(credsFile)) {
-        await session.init();
+        try {
+          migrateSessionDirectory(authDir, encryptionKey);
+          const creds = readDecryptedJson(credsFile, encryptionKey);
+          if (creds && (creds.registered || creds.me)) {
+            console.log(`[WhatsApp Engine ${userId}] Resuming authenticated WhatsApp session on startup...`);
+            const session = getOrCreateUserSession(userId);
+            await session.init();
+          }
+        } catch (e) {
+          console.error(`[WhatsApp Engine ${userId}] Error restoring creds on boot:`, e.message);
+        }
       }
     }
   } catch (err) {
     console.error("[WhatsApp Engine] Error booting active sessions:", err.message);
+  }
+}
+
+// Gracefully close all active sockets during server restart or shutdown
+async function closeAllActiveSessions() {
+  for (const [userId, session] of userSessions.entries()) {
+    session.clearReconnectTimer();
+    if (session.sock) {
+      const sock = session.sock;
+      session.sock = null;
+      try {
+        if (sock.ev && typeof sock.ev.removeAllListeners === "function") {
+          sock.ev.removeAllListeners();
+        }
+        sock.end(undefined);
+      } catch (_) {}
+    }
   }
 }
 
@@ -902,6 +952,7 @@ async function closeAndCleanupUserSession(userId) {
 module.exports = {
   getOrCreateUserSession,
   initAllActiveSessions,
+  closeAllActiveSessions,
   closeAndCleanupUserSession,
   getStatus: (userId, opts) => getOrCreateUserSession(userId).getStatus(opts),
   requestPairingCode: (userId, phone) => getOrCreateUserSession(userId).requestPairingCode(phone),
