@@ -78,6 +78,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const authForm = document.getElementById("authForm");
   const authUsernameInput = document.getElementById("authUsernameInput");
   const authPasswordInput = document.getElementById("authPasswordInput");
+  const authConfirmPasswordGroup = document.getElementById("authConfirmPasswordGroup");
+  const authConfirmPasswordInput = document.getElementById("authConfirmPasswordInput");
+  const btnToggleAuthConfirmPassword = document.getElementById("btnToggleAuthConfirmPassword");
   const authErrorMsg = document.getElementById("authErrorMsg");
   const authSubmitBtn = document.getElementById("authSubmitBtn");
   const authSubmitText = document.getElementById("authSubmitText");
@@ -148,10 +151,18 @@ document.addEventListener("DOMContentLoaded", () => {
     authModal.style.display = "flex";
     authModal.classList.add("active");
     if (authPasswordInput) authPasswordInput.type = "password";
+    if (authConfirmPasswordInput) {
+      authConfirmPasswordInput.type = "password";
+      authConfirmPasswordInput.value = "";
+    }
     const eyeOpen = document.getElementById("eyeIconOpen");
     const eyeClosed = document.getElementById("eyeIconClosed");
     if (eyeOpen) eyeOpen.style.display = "block";
     if (eyeClosed) eyeClosed.style.display = "none";
+    const eyeOpenConfirm = document.getElementById("eyeIconOpenConfirm");
+    const eyeClosedConfirm = document.getElementById("eyeIconClosedConfirm");
+    if (eyeOpenConfirm) eyeOpenConfirm.style.display = "block";
+    if (eyeClosedConfirm) eyeClosedConfirm.style.display = "none";
     checkAuthSetup();
   }
 
@@ -197,6 +208,22 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function updateAuthModalUI() {
+    const isRegistering = isInitialSetup || isSetupMode;
+    if (authConfirmPasswordGroup) {
+      if (isRegistering) {
+        authConfirmPasswordGroup.classList.remove("hidden");
+        authConfirmPasswordGroup.classList.add("visible");
+        if (authConfirmPasswordInput) authConfirmPasswordInput.required = true;
+      } else {
+        authConfirmPasswordGroup.classList.remove("visible");
+        authConfirmPasswordGroup.classList.add("hidden");
+        if (authConfirmPasswordInput) {
+          authConfirmPasswordInput.required = false;
+          authConfirmPasswordInput.value = "";
+        }
+      }
+    }
+
     if (isInitialSetup) {
       if (authModalTitle) authModalTitle.textContent = "Initial Setup — Create Admin";
       if (authModalDesc) authModalDesc.textContent = "Welcome! Create your administrator username and password to secure your scheduler:";
@@ -257,12 +284,43 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  if (btnToggleAuthConfirmPassword && authConfirmPasswordInput) {
+    btnToggleAuthConfirmPassword.onclick = () => {
+      const eyeOpenConfirm = document.getElementById("eyeIconOpenConfirm");
+      const eyeClosedConfirm = document.getElementById("eyeIconClosedConfirm");
+      const isPass = authConfirmPasswordInput.type === "password";
+      authConfirmPasswordInput.type = isPass ? "text" : "password";
+      if (eyeOpenConfirm) eyeOpenConfirm.style.display = isPass ? "none" : "block";
+      if (eyeClosedConfirm) eyeClosedConfirm.style.display = isPass ? "block" : "none";
+      authConfirmPasswordInput.focus();
+    };
+  }
+
   if (authForm) {
     authForm.onsubmit = async (e) => {
       e.preventDefault();
       const username = (authUsernameInput?.value || "").trim();
       const password = authPasswordInput?.value || "";
       if (!username || !password) return;
+
+      const isRegistering = isInitialSetup || isSetupMode;
+      if (isRegistering) {
+        const confirmPassword = authConfirmPasswordInput?.value || "";
+        if (password !== confirmPassword) {
+          if (authErrorMsg) {
+            authErrorMsg.textContent = "Passwords do not match. Please verify your password.";
+            authErrorMsg.style.display = "block";
+            const card = authModal ? authModal.querySelector(".modal-card") : null;
+            if (card) {
+              card.classList.remove("auth-shake");
+              void card.offsetWidth;
+              card.classList.add("auth-shake");
+            }
+          }
+          if (authConfirmPasswordInput) authConfirmPasswordInput.focus();
+          return;
+        }
+      }
 
       if (authSubmitBtn) authSubmitBtn.disabled = true;
       if (authErrorMsg) authErrorMsg.style.display = "none";
@@ -292,12 +350,24 @@ document.addEventListener("DOMContentLoaded", () => {
           if (authErrorMsg) {
             authErrorMsg.textContent = data.error || "Authentication failed. Please check credentials.";
             authErrorMsg.style.display = "block";
+            const card = authModal ? authModal.querySelector(".modal-card") : null;
+            if (card) {
+              card.classList.remove("auth-shake");
+              void card.offsetWidth;
+              card.classList.add("auth-shake");
+            }
           }
         }
       } catch (err) {
         if (authErrorMsg) {
           authErrorMsg.textContent = "Network error connecting to server.";
           authErrorMsg.style.display = "block";
+          const card = authModal ? authModal.querySelector(".modal-card") : null;
+          if (card) {
+            card.classList.remove("auth-shake");
+            void card.offsetWidth;
+            card.classList.add("auth-shake");
+          }
         }
       } finally {
         if (authSubmitBtn) authSubmitBtn.disabled = false;
