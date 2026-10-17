@@ -2625,6 +2625,35 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  // Synchronize status bar color with app theme (#F5F7FB)
+  function syncNativeStatusBar() {
+    if (window.AndroidNative && typeof window.AndroidNative.setStatusBarColor === "function") {
+      try {
+        window.AndroidNative.setStatusBarColor("#F5F7FB", true);
+      } catch (_) {}
+    }
+  }
+  syncNativeStatusBar();
+
+  // Synchronize safe area insets fallback from Android bridge for older WebViews (< M144)
+  function syncSafeAreaInsets() {
+    if (window.AndroidNative) {
+      try {
+        const top = typeof window.AndroidNative.getSafeAreaInsetTop === "function" 
+          ? window.AndroidNative.getSafeAreaInsetTop() : 0;
+        const bottom = typeof window.AndroidNative.getSafeAreaInsetBottom === "function" 
+          ? window.AndroidNative.getSafeAreaInsetBottom() : 0;
+        if (top > 0) {
+          document.documentElement.style.setProperty("--safe-area-top-fallback", top + "px");
+        }
+        if (bottom > 0) {
+          document.documentElement.style.setProperty("--safe-area-bottom-fallback", bottom + "px");
+        }
+      } catch (_) {}
+    }
+  }
+  syncSafeAreaInsets();
+
   // Dismiss App Splash Screen smoothly (DailyFlutterUI style transition)
   function dismissSplashScreen() {
     const splash = document.getElementById("appSplashScreen");
