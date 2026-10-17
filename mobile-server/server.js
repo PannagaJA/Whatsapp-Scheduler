@@ -741,7 +741,7 @@ if (require.main === module) {
       console.error("[Startup] Admin bootstrap warning:", err.message);
     }
 
-    app.listen(PORT, async () => {
+    const serverInstance = app.listen(PORT, async () => {
       console.log(`\n======================================================`);
       console.log(`📱 WhatsApp Scheduler Mobile PWA & Server running!`);
       console.log(`🚀 Access Dashboard: http://localhost:${PORT}`);
@@ -754,6 +754,23 @@ if (require.main === module) {
         console.error("Failed to initialize active WhatsApp sessions on boot:", err);
       }
     });
+
+    const gracefulShutdown = async (signal) => {
+      console.log(`\n[Server] Received ${signal}. Gracefully stopping server and disconnecting WhatsApp sessions...`);
+      try {
+        const { closeAllActiveSessions } = require("./engine");
+        await closeAllActiveSessions();
+      } catch (e) {
+        console.error("[Server] Error closing WhatsApp sessions during shutdown:", e.message);
+      }
+      serverInstance.close(() => {
+        process.exit(0);
+      });
+      setTimeout(() => process.exit(0), 3000).unref();
+    };
+
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
   }).catch((err) => {
     console.error("Failed to initialize database on boot:", err);
     process.exit(1);
