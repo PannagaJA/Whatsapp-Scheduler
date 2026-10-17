@@ -26,12 +26,20 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import android.graphics.Color;
+import android.view.Window;
+import android.view.WindowManager;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.json.JSONArray;
@@ -61,18 +69,88 @@ public class MainActivity extends AppCompatActivity {
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();
     private String pendingInstallApkPath = null;
 
+    private int topInsetDp = 0;
+    private int bottomInsetDp = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setupSystemBars();
         setContentView(R.layout.activity_main);
 
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
         webView = findViewById(R.id.webView);
 
+        // Safe area fallback listener for older WebViews (< M144) where env(safe-area-inset) is 0
+        ViewCompat.setOnApplyWindowInsetsListener(swipeRefreshLayout, (v, windowInsets) -> {
+            Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            float density = getResources().getDisplayMetrics().density;
+            topInsetDp = Math.round(insets.top / (density > 0 ? density : 1f));
+            bottomInsetDp = Math.round(insets.bottom / (density > 0 ? density : 1f));
+            injectSafeAreaInsets();
+            return windowInsets;
+        });
+
         setupSwipeRefresh();
         setupWebView();
 
         webView.loadUrl(APP_URL);
+    }
+
+    private void setupSystemBars() {
+        Window window = getWindow();
+        int appBg = ContextCompat.getColor(this, R.color.app_background);
+        int darkBg = ContextCompat.getColor(this, R.color.background);
+
+        // Edge-to-edge for targetSdk 35+ and modern Android:
+        // Window decor draws behind system bars; PWA handles env(safe-area-inset-top/bottom)
+        // in CSS to avoid conflicting double-inset padding in native views.
+        WindowCompat.setDecorFitsSystemWindows(window, false);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // API 23+: Dark status-bar icons supported, draw app background behind transparent bar
+                window.setStatusBarColor(Color.TRANSPARENT);
+            } else {
+                // Below API 23: Dark status-bar icons unsupported, keep status bar dark
+                window.setStatusBarColor(darkBg);
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // API 26+: Dark navigation-bar icons supported, draw app background behind transparent bar
+                window.setNavigationBarColor(Color.TRANSPARENT);
+            } else {
+                // Below API 26: Dark navigation-bar icons unsupported, keep navigation bar dark
+                window.setNavigationBarColor(darkBg);
+            }
+        }
+
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+        if (controller != null) {
+            controller.setAppearanceLightStatusBars(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
+            controller.setAppearanceLightNavigationBars(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O);
+        }
+    }
+
+    private void injectSafeAreaInsets() {
+        if (webView == null) return;
+        final String js = String.format(Locale.US,
+            "(function() {" +
+            "  var r = document.documentElement.style;" +
+            "  if (r) {" +
+            "    r.setProperty('--safe-area-top-fallback', '%dpx');" +
+            "    r.setProperty('--safe-area-bottom-fallback', '%dpx');" +
+            "  }" +
+            "})();", topInsetDp, bottomInsetDp);
+        runOnUiThread(() -> {
+            try {
+                webView.evaluateJavascript(js, null);
+            } catch (Exception ignored) {}
+        });
     }
 
     private void setupSwipeRefresh() {
@@ -81,7 +159,7 @@ public class MainActivity extends AppCompatActivity {
             ContextCompat.getColor(this, R.color.accent)
         );
         swipeRefreshLayout.setProgressBackgroundColorSchemeColor(
-            ContextCompat.getColor(this, R.color.background)
+            ContextCompat.getColor(this, R.color.app_background)
         );
 
         swipeRefreshLayout.setOnRefreshListener(() -> {
@@ -162,6 +240,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 swipeRefreshLayout.setRefreshing(false);
+                injectSafeAreaInsets();
             }
         });
 
@@ -250,6 +329,37 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean isNativeApp() {
             return true;
+        }
+
+        @JavascriptInterface
+        public int getSafeAreaInsetTop() {
+            return topInsetDp;
+        }
+
+        @JavascriptInterface
+        public int getSafeAreaInsetBottom() {
+            return bottomInsetDp;
+        }
+
+        @JavascriptInterface
+        public void setStatusBarColor(final String hexColor, final boolean isLight) {
+            runOnUiThread(() -> {
+                try {
+                    int color = Color.parseColor(hexColor);
+                    Window window = getWindow();
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                        // Below API 23, dark icons are unsupported; ignore light color to prevent white-on-white icons
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M || !isLight) {
+                            window.setStatusBarColor(color);
+                        }
+                    }
+                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+                    if (controller != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        controller.setAppearanceLightStatusBars(isLight);
+                    }
+                } catch (Exception ignored) {}
+            });
         }
 
         @JavascriptInterface
