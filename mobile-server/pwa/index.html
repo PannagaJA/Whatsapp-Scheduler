@@ -80,6 +80,16 @@
               var txt = el.querySelector(".status-text");
               if (txt) txt.textContent = s === "connected" ? "Connected" : (s === "connecting" ? "Connecting…" : (s === "qr" ? "Scan QR Code" : "Disconnected"));
             }
+            var uStr = localStorage.getItem("wa_current_user");
+            if (uStr) {
+              var uObj = JSON.parse(uStr);
+              if (uObj && uObj.username) {
+                var initEl = document.getElementById("headerAvatarInitial");
+                if (initEl) initEl.textContent = uObj.username.charAt(0).toUpperCase();
+                var greetEl = document.getElementById("heroGreetingName");
+                if (greetEl) greetEl.textContent = uObj.username;
+              }
+            }
           } catch (_) {}
         </script>
         
