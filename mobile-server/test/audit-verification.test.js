@@ -243,6 +243,9 @@ async function runAuditVerificationTests() {
     const userB_Id = crypto.randomUUID();
     const now = Date.now();
 
+    // Clean up any stale test schedules from previous runs so LIMIT 100 is not flooded
+    await run("DELETE FROM schedules WHERE recipient LIKE '91900000000%' OR recipient = '919999999991' OR recipient = '919999999992'");
+
     // User A job (disconnected)
     const jobA_Id = crypto.randomUUID();
     await run(`
