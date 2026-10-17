@@ -20,9 +20,45 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="/style.css?v=3.4">
+  <link rel="stylesheet" href="/style.css?v=3.6">
 </head>
 <body>
+  <!-- DailyFlutterUI Inspired Animated App Splash Screen -->
+  <div id="appSplashScreen" class="app-splash-screen" aria-label="Loading Application">
+    <div class="splash-ambient-bg"></div>
+    <div class="splash-content">
+      <!-- Glow & Expanding Ripple Rings -->
+      <div class="splash-aura-glow"></div>
+      <div class="splash-ripple splash-ripple-1"></div>
+      <div class="splash-ripple splash-ripple-2"></div>
+      
+      <!-- Floating App Icon (Replaces Money Bundle) -->
+      <div class="splash-icon-card">
+        <img src="/icons/icon-192.png" alt="WhatsApp Scheduler" class="splash-icon-img" width="80" height="80">
+        <div class="splash-icon-gloss"></div>
+      </div>
+
+      <!-- Floating Sparkle Accents -->
+      <div class="splash-sparkle splash-sparkle-1">✦</div>
+      <div class="splash-sparkle splash-sparkle-2">✦</div>
+      <div class="splash-sparkle splash-sparkle-3">✦</div>
+
+      <!-- App Branding -->
+      <div class="splash-brand-block">
+        <h1 class="splash-app-name">WhatsApp Scheduler</h1>
+        <p class="splash-app-tagline">Autonomous Messaging Assistant</p>
+      </div>
+
+      <!-- Modern Shimmer Loading Bar -->
+      <div class="splash-loader-wrap">
+        <div class="splash-progress-track">
+          <div class="splash-progress-bar"></div>
+        </div>
+        <div class="splash-loader-label">Starting workspace…</div>
+      </div>
+    </div>
+  </div>
+
   <div class="app-container">
     <!-- Header: DailyFlutterUI Clean Header -->
     <header class="app-header">
@@ -776,6 +812,6 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <script src="/app.js?v=3.2"></script>
+  <script src="/app.js?v=3.3"></script>
 </body>
 </html>
