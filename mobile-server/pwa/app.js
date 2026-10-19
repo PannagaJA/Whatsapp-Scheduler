@@ -2721,4 +2721,309 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }, 60 * 1000);
   }, 2500);
+
+  // ==========================================================================
+  // 17. Interactive Spotlight Tour Guide for New Users
+  // ==========================================================================
+  const tourOverlay = document.getElementById("tourSpotlightOverlay");
+  const tourCutout = document.getElementById("tourSpotlightCutout");
+  const tourGlow = document.getElementById("tourHighlightGlow");
+  const tourCard = document.getElementById("tourTooltipCard");
+  const tourStepBadge = document.getElementById("tourStepBadge");
+  const tourTitle = document.getElementById("tourTooltipTitle");
+  const tourDesc = document.getElementById("tourTooltipDesc");
+  const tourDotsIndicator = document.getElementById("tourDotsIndicator");
+  const tourBtnPrev = document.getElementById("tourBtnPrev");
+  const tourBtnNext = document.getElementById("tourBtnNext");
+  const tourBtnClose = document.getElementById("tourBtnClose");
+  const btnStartTour = document.getElementById("btnStartTour");
+
+  let currentTourStep = 0;
+  let isTourActive = false;
+
+  const TOUR_STEPS = [
+    {
+      targetSelector: "#heroFrontCard",
+      tab: "paneSchedule",
+      title: "1. WhatsApp Connection Status",
+      desc: "Live status of your WhatsApp connection. Check if you're linked and ready to schedule messages autonomously.",
+      padX: 8,
+      padY: 8,
+      radius: 16
+    },
+    {
+      targetSelector: "#quickActionRequest",
+      tab: "paneSchedule",
+      title: "2. Pair with 8-Digit Code",
+      desc: "Tap 'Pair Code' to link directly with your phone number without needing to scan QR codes with a second camera.",
+      padX: 10,
+      padY: 10,
+      radius: 18
+    },
+    {
+      targetSelector: "#pairModalCard",
+      tab: "paneSchedule",
+      title: "3. Enter Number & Receive Code",
+      desc: "Type your WhatsApp number here, click 'Get 8-Digit Pairing Code', and enter the 8-digit key on your phone prompt to link.",
+      padX: 12,
+      padY: 12,
+      radius: 20,
+      action: () => {
+        const modal = document.getElementById("pairModal");
+        if (modal) {
+          modal.classList.add("active");
+          modal.style.display = "flex";
+        }
+      },
+      cleanup: () => {
+        const modal = document.getElementById("pairModal");
+        if (modal) {
+          modal.classList.remove("active");
+          modal.style.display = "none";
+        }
+      }
+    },
+    {
+      targetSelector: "#pickNativeContactBtn",
+      tab: "paneSchedule",
+      title: "4. Sync Phonebook Contacts",
+      desc: "Tap here to import your device contacts once. This enables lightning-fast recipient suggestions when composing.",
+      padX: 10,
+      padY: 6,
+      radius: 12
+    },
+    {
+      targetSelector: "#scheduleForm",
+      tab: "paneSchedule",
+      title: "5. Compose & Schedule",
+      desc: "Pick a recipient, write your message, optionally attach images or documents, and select the exact date & time to dispatch.",
+      padX: 8,
+      padY: 8,
+      radius: 18
+    },
+    {
+      targetSelector: '.nav-item[data-tab="paneQueue"]',
+      tab: "paneSchedule",
+      title: "6. Track Queue & History",
+      desc: "Monitor upcoming scheduled messages, inspect delivery statuses, or edit and cancel queued announcements anytime.",
+      padX: 12,
+      padY: 8,
+      radius: 20
+    }
+  ];
+
+  function positionSpotlight(targetEl, stepConfig) {
+    if (!targetEl || !tourOverlay || !tourCutout || !tourCard) return;
+
+    const padX = stepConfig.padX || 8;
+    const padY = stepConfig.padY || 8;
+    const radius = stepConfig.radius || 14;
+
+    const rect = targetEl.getBoundingClientRect();
+    const x = Math.max(0, rect.left - padX);
+    const y = Math.max(0, rect.top - padY);
+    const w = Math.min(window.innerWidth - x, rect.width + (padX * 2));
+    const h = rect.height + (padY * 2);
+
+    // Update SVG Cutout
+    tourCutout.setAttribute("x", x);
+    tourCutout.setAttribute("y", y);
+    tourCutout.setAttribute("width", w);
+    tourCutout.setAttribute("height", h);
+    tourCutout.setAttribute("rx", radius);
+    tourCutout.setAttribute("ry", radius);
+
+    // Update Highlight Glow
+    if (tourGlow) {
+      tourGlow.style.left = `${x}px`;
+      tourGlow.style.top = `${y}px`;
+      tourGlow.style.width = `${w}px`;
+      tourGlow.style.height = `${h}px`;
+      tourGlow.style.borderRadius = `${radius}px`;
+      tourGlow.classList.add("active");
+    }
+
+    // Position Tooltip Card (Smart placement above or below)
+    const cardWidth = Math.min(window.innerWidth - 32, 360);
+    const cardHeight = tourCard.offsetHeight || 190;
+    
+    // Horizontal center with 16px viewport clamp
+    let cardLeft = (rect.left + (rect.width / 2)) - (cardWidth / 2);
+    cardLeft = Math.max(16, Math.min(window.innerWidth - cardWidth - 16, cardLeft));
+
+    // Vertical placement
+    let cardTop;
+    const spaceBelow = window.innerHeight - (y + h);
+    const spaceAbove = y;
+
+    if (spaceBelow >= cardHeight + 20) {
+      // Below target
+      cardTop = y + h + 14;
+    } else if (spaceAbove >= cardHeight + 20) {
+      // Above target
+      cardTop = Math.max(16, y - cardHeight - 14);
+    } else {
+      // Fallback: center in lower third or upper third
+      cardTop = Math.max(16, (window.innerHeight - cardHeight) / 2);
+    }
+
+    tourCard.style.left = `${cardLeft}px`;
+    tourCard.style.top = `${cardTop}px`;
+    tourCard.style.width = `${cardWidth}px`;
+  }
+
+  function renderTourStep(stepIndex) {
+    if (stepIndex < 0 || stepIndex >= TOUR_STEPS.length) return;
+
+    // Run cleanup on current step if it exists
+    const prevStep = TOUR_STEPS[currentTourStep];
+    if (prevStep && typeof prevStep.cleanup === "function") {
+      try { prevStep.cleanup(); } catch (_) {}
+    }
+
+    currentTourStep = stepIndex;
+    const step = TOUR_STEPS[stepIndex];
+
+    if (step.tab) {
+      switchTab(step.tab);
+    }
+
+    // Execute step setup action (e.g. open pairModal)
+    if (typeof step.action === "function") {
+      try { step.action(); } catch (_) {}
+    }
+
+    let targetEl = document.querySelector(step.targetSelector);
+    if (!targetEl) {
+      targetEl = document.getElementById("scheduleForm") || document.body;
+    }
+
+    // Update Text Content
+    if (tourStepBadge) tourStepBadge.textContent = `Step ${stepIndex + 1} of ${TOUR_STEPS.length}`;
+    if (tourTitle) tourTitle.textContent = step.title;
+    if (tourDesc) tourDesc.textContent = step.desc;
+
+    // Update Dots
+    if (tourDotsIndicator) {
+      tourDotsIndicator.innerHTML = "";
+      TOUR_STEPS.forEach((_, idx) => {
+        const dot = document.createElement("span");
+        dot.className = "tour-dot" + (idx === stepIndex ? " active" : "");
+        tourDotsIndicator.appendChild(dot);
+      });
+    }
+
+    // Update Navigation Buttons
+    if (tourBtnPrev) {
+      tourBtnPrev.style.display = stepIndex === 0 ? "none" : "inline-block";
+    }
+    if (tourBtnNext) {
+      tourBtnNext.textContent = stepIndex === TOUR_STEPS.length - 1 ? "Finish ✓" : "Next";
+    }
+
+    // Scroll target smoothly into center
+    try {
+      targetEl.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    } catch (_) {}
+
+    // Allow smooth scroll to settle, then adjust spotlight
+    setTimeout(() => {
+      // Re-query target element in case it was dynamically mounted or shown
+      const freshTarget = document.querySelector(step.targetSelector) || targetEl;
+      positionSpotlight(freshTarget, step);
+    }, 280);
+  }
+
+  function startInteractiveTour(force = false) {
+    if (!force) {
+      try {
+        if (localStorage.getItem("wa_tour_completed") === "true") return;
+      } catch (_) {}
+    }
+
+    if (!tourOverlay) return;
+    isTourActive = true;
+    currentTourStep = 0;
+    tourOverlay.style.display = "block";
+    tourOverlay.classList.remove("tour-hidden");
+    tourOverlay.setAttribute("aria-hidden", "false");
+
+    renderTourStep(0);
+  }
+
+  function endInteractiveTour(markCompleted = true) {
+    if (!tourOverlay) return;
+
+    // Clean up active step hooks
+    const activeStep = TOUR_STEPS[currentTourStep];
+    if (activeStep && typeof activeStep.cleanup === "function") {
+      try { activeStep.cleanup(); } catch (_) {}
+    }
+
+    isTourActive = false;
+    tourOverlay.classList.add("tour-hidden");
+    tourOverlay.setAttribute("aria-hidden", "true");
+    setTimeout(() => {
+      tourOverlay.style.display = "none";
+      if (tourGlow) tourGlow.classList.remove("active");
+    }, 300);
+
+    if (markCompleted) {
+      try {
+        localStorage.setItem("wa_tour_completed", "true");
+      } catch (_) {}
+      showToast("✓ Tour completed! Tap ? in header to replay anytime.");
+    }
+  }
+
+  function nextTourStep() {
+    if (currentTourStep >= TOUR_STEPS.length - 1) {
+      endInteractiveTour(true);
+    } else {
+      renderTourStep(currentTourStep + 1);
+    }
+  }
+
+  function prevTourStep() {
+    if (currentTourStep > 0) {
+      renderTourStep(currentTourStep - 1);
+    }
+  }
+
+  if (tourBtnNext) tourBtnNext.onclick = nextTourStep;
+  if (tourBtnPrev) tourBtnPrev.onclick = prevTourStep;
+  if (tourBtnClose) tourBtnClose.onclick = () => endInteractiveTour(true);
+  if (btnStartTour) btnStartTour.onclick = () => startInteractiveTour(true);
+
+  // Recalculate spotlight on scroll/resize while tour is active
+  window.addEventListener("resize", () => {
+    if (!isTourActive) return;
+    const step = TOUR_STEPS[currentTourStep];
+    const targetEl = document.querySelector(step.targetSelector);
+    if (targetEl) positionSpotlight(targetEl, step);
+  }, { passive: true });
+
+  window.addEventListener("scroll", () => {
+    if (!isTourActive) return;
+    const step = TOUR_STEPS[currentTourStep];
+    const targetEl = document.querySelector(step.targetSelector);
+    if (targetEl) positionSpotlight(targetEl, step);
+  }, { passive: true });
+
+  // Keyboard navigation for accessibility
+  window.addEventListener("keydown", (e) => {
+    if (!isTourActive) return;
+    if (e.key === "Escape") endInteractiveTour(true);
+    if (e.key === "ArrowRight") nextTourStep();
+    if (e.key === "ArrowLeft") prevTourStep();
+  });
+
+  // Auto-launch for first-time users after splash screen and initial load
+  setTimeout(() => {
+    try {
+      if (localStorage.getItem("wa_tour_completed") !== "true") {
+        startInteractiveTour(false);
+      }
+    } catch (_) {}
+  }, 2400);
 });
