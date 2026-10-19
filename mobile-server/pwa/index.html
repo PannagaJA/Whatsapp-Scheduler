@@ -352,12 +352,24 @@
 
           <!-- Mandatory Phonebook Sync Gate Card -->
           <div class="phonebook-gate-card" id="phonebookGateCard" style="display: none;">
-            <div class="gate-icon-wrap" style="display: inline-flex; align-items: center; justify-content: center;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><circle cx="12" cy="10" r="3"/><path d="M16 17a4 4 0 0 0-8 0"/></svg></div>
+            <div class="gate-icon-wrap" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+                <circle cx="12" cy="10" r="3"/>
+                <path d="M16 17a4 4 0 0 0-8 0"/>
+              </svg>
+            </div>
             <div class="gate-text-wrap">
-              <div class="gate-title">Step 2: Sync Phonebook Contacts</div>
+              <div class="gate-header-row">
+                <span class="gate-step-badge">Step 2</span>
+                <span class="gate-title">Sync Phonebook Contacts</span>
+              </div>
               <div class="gate-desc">Sync device contacts to unlock contact selection and scheduling.</div>
             </div>
-            <button type="button" class="btn-gate-sync" id="btnGateSyncPhonebook">
+            <button type="button" class="btn-gate-sync" id="btnGateSyncPhonebook" title="Sync Phonebook Contacts">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
               <span>Sync Now</span>
             </button>
           </div>
