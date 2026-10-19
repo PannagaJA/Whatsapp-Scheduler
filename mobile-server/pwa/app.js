@@ -615,6 +615,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (targetId === "paneQueue") {
       loadSchedules();
     } else if (targetId === "paneSchedule") {
+      checkStatus();
       loadContacts();
     } else if (targetId === "paneDevice") {
       checkStatus();
@@ -1523,6 +1524,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateInputAvailability(status, isSyncing, count) {
     const isConn = status === "connected";
     const isConnecting = status === "connecting";
+    const isQr = status === "qr";
     const phonebookDone = isPhonebookImported();
     const enableInputs = isConn && phonebookDone;
 
@@ -1534,7 +1536,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (scheduleStatusPill) {
           if (isConnecting) {
             scheduleStatusPill.className = "status-pill-badge connecting";
-            scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Connecting…</span>';
+            scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Connecting to WhatsApp…</span>';
+          } else if (isQr) {
+            scheduleStatusPill.className = "status-pill-badge connecting";
+            scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Ready to Link</span>';
           } else {
             scheduleStatusPill.className = "status-pill-badge disconnected";
             scheduleStatusPill.innerHTML = '<span class="dot-indicator"></span><span class="status-text-label">Status: Disconnected</span>';
@@ -1929,15 +1934,13 @@ document.addEventListener("DOMContentLoaded", () => {
           qrImg.style.display = "block";
         }
         if (qrSpinner) qrSpinner.style.display = "none";
-      } else if (data.connected) {
-        if (qrImg) {
-          qrImg.style.display = "none";
-          qrImg.src = "";
-        }
-        if (qrSpinner) {
-          qrSpinner.style.display = "flex";
-          if (qrStatusText) qrStatusText.textContent = "✓ Already Connected!";
-        }
+      } else if (data.connected || data.status === "connected") {
+        if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+        if (qrModal) qrModal.classList.remove("active");
+        showToast("✓ WhatsApp Connected Successfully!");
+        await checkStatus();
+        switchTab("paneSchedule");
+        return;
       } else {
         if (qrSpinner) {
           qrSpinner.style.display = "flex";
@@ -1975,6 +1978,7 @@ document.addEventListener("DOMContentLoaded", () => {
     qrModalClose.onclick = () => {
       if (qrModal) qrModal.classList.remove("active");
       if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+      checkStatus();
     };
   }
 
@@ -1998,6 +2002,7 @@ document.addEventListener("DOMContentLoaded", () => {
     pairModalClose.onclick = () => {
       if (pairModal) pairModal.classList.remove("active");
       if (pairPollInterval) { clearInterval(pairPollInterval); pairPollInterval = null; }
+      checkStatus();
     };
   }
 
@@ -2006,10 +2011,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (qrModal && e.target === qrModal) {
       qrModal.classList.remove("active");
       if (qrPollInterval) { clearInterval(qrPollInterval); qrPollInterval = null; }
+      checkStatus();
     }
     if (pairModal && e.target === pairModal) {
       pairModal.classList.remove("active");
       if (pairPollInterval) { clearInterval(pairPollInterval); pairPollInterval = null; }
+      checkStatus();
     }
   });
 
