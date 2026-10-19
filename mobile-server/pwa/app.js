@@ -1096,7 +1096,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const headEl = document.createElement("div");
-    headEl.style.cssText = "padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between;";
+    headEl.className = "suggestions-header";
     const headTitle = document.createElement("span");
     headTitle.textContent = q ? "MATCHING CONTACTS" : "PHONEBOOK CONTACTS";
     const headCount = document.createElement("span");
