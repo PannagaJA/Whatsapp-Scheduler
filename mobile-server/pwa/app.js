@@ -1531,6 +1531,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Update WhatsApp Not Connected vs Phonebook Gate Cards
     if (waNotConnectedCard) {
       if (!isConn) {
+        waNotConnectedCard.classList.remove("hidden");
         waNotConnectedCard.style.display = "flex";
         waNotConnectedCard.style.flexDirection = "column";
         if (scheduleStatusPill) {
@@ -1546,6 +1547,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
       } else {
+        waNotConnectedCard.classList.add("hidden");
         waNotConnectedCard.style.display = "none";
       }
     }
