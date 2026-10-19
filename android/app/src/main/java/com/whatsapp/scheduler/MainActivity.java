@@ -241,6 +241,9 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 swipeRefreshLayout.setRefreshing(false);
                 injectSafeAreaInsets();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    android.webkit.CookieManager.getInstance().flush();
+                }
             }
         });
 
