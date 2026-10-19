@@ -2636,26 +2636,156 @@ textarea {
 }
 
 .phonebook-gate-card {
-  background: #F0FDF4;
-  border: 1px solid #BBF7D0;
-  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: 16px;
   padding: 14px 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 16px;
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.08), 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.phonebook-gate-card:hover {
+  border-color: rgba(16, 185, 129, 0.42);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.12), 0 2px 4px rgba(0, 0, 0, 0.03);
+}
+
+.gate-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.28);
+}
+
+.gate-text-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.gate-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+  flex-wrap: wrap;
+}
+
+.gate-step-badge {
+  background: rgba(16, 185, 129, 0.15);
+  color: #065F46;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  text-transform: uppercase;
+}
+
+.gate-title {
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #064E3B;
+  letter-spacing: -0.2px;
+  line-height: 1.3;
+}
+
+.gate-desc {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: #047857;
+  line-height: 1.45;
+  font-weight: 500;
+  opacity: 0.9;
 }
 
 .btn-gate-sync {
-  background: #10B981;
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
   color: #FFFFFF;
   border: none;
-  border-radius: var(--radius-full);
-  padding: 6px 14px;
-  font-size: 12px;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.32);
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.btn-gate-sync:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(16, 185, 129, 0.42);
+}
+
+.btn-gate-sync:active {
+  transform: scale(0.97);
+}
+
+/* Dark mode support for Phonebook Gate Card */
+[data-theme="dark"] .phonebook-gate-card {
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.4) 0%, rgba(6, 78, 59, 0.2) 100%);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="dark"] .gate-step-badge {
+  background: rgba(16, 185, 129, 0.25);
+  color: #6EE7B7;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+[data-theme="dark"] .gate-title {
+  color: #ECFDF5;
+}
+
+[data-theme="dark"] .gate-desc {
+  color: #A7F3D0;
+}
+
+@media (max-width: 480px) {
+  .phonebook-gate-card {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .gate-icon-wrap {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+  }
+  .gate-icon-wrap svg {
+    width: 19px;
+    height: 19px;
+  }
+  .gate-title {
+    font-size: 13.5px;
+  }
+  .gate-desc {
+    font-size: 11.5px;
+  }
+  .btn-gate-sync {
+    padding: 7px 13px;
+    font-size: 12px;
+  }
 }
 
 .sync-banner {
