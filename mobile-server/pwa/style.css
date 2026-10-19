@@ -2205,57 +2205,191 @@ textarea {
 }
 
 /* ==========================================================================
-   Sign In & Register Modal Animation & Aesthetics
+   Universal Confirmation Dialog Modal Aesthetics
    ========================================================================== */
-#authModal.modal-overlay {
-  background: rgba(15, 23, 42, 0.65);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+#confirmActionModal {
+  z-index: 10050 !important;
 }
 
-#authModal.modal-overlay.active {
+#confirmActionModal.active {
+  display: flex !important;
+}
+
+.confirm-modal-card {
+  max-width: 360px !important;
+  text-align: center;
+  padding: 28px 24px 22px !important;
+  border-radius: 20px !important;
+  background: var(--bg-card, #FFFFFF) !important;
+  border: 1px solid var(--border-card, #E2E8F0);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] .confirm-modal-card {
+  background: #1E293B !important;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.confirm-modal-visual {
   display: flex;
-  animation: authOverlayFade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  justify-content: center;
+  margin-bottom: 16px;
 }
 
-@keyframes authOverlayFade {
-  from {
-    opacity: 0;
-    backdrop-filter: blur(0px);
-    -webkit-backdrop-filter: blur(0px);
-  }
-  to {
-    opacity: 1;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-  }
+.confirm-icon-badge {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
 }
 
-#authModal .modal-card {
-  max-width: 410px;
-  border-radius: 20px;
-  background: var(--bg-card, #FFFFFF);
-  border: 1px solid var(--border-card, rgba(226, 232, 240, 0.9));
-  box-shadow: 0 24px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.04);
-  padding: 26px 24px 22px;
-  animation: authCardEntrance 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  transform-origin: center bottom;
+.confirm-icon-badge.danger {
+  background: #FEF2F2;
+  color: #DC2626;
+  border: 1.5px solid #FECACA;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.12);
+}
+
+[data-theme="dark"] .confirm-icon-badge.danger {
+  background: rgba(239, 68, 68, 0.15);
+  color: #F87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.confirm-icon-badge.primary {
+  background: #ECFDF5;
+  color: #059669;
+  border: 1.5px solid #A7F3D0;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.12);
+}
+
+.confirm-modal-title {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text-main, #0F172A);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.015em;
+}
+
+.confirm-modal-message {
+  font-size: 13.5px;
+  color: var(--text-secondary, #64748B);
+  line-height: 1.5;
+  margin: 0 0 22px 0;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.confirm-btn-cancel {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  background: var(--bg-surface, #F1F5F9);
+  color: var(--text-secondary, #475569);
+  border: 1px solid var(--border-subtle, #CBD5E1);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.confirm-btn-cancel:hover {
+  background: #E2E8F0;
+  color: var(--text-main, #0F172A);
+}
+
+.confirm-btn-confirm {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-btn-confirm.btn-danger {
+  background: #DC2626 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);
+}
+
+.confirm-btn-confirm.btn-danger:hover {
+  background: #B91C1C !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(220, 38, 38, 0.45);
+}
+
+.confirm-btn-confirm.btn-primary {
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35);
+}
+
+.confirm-btn-confirm:active, .confirm-btn-cancel:active {
+  transform: scale(0.97);
+}
+
+/* ==========================================================================
+   Dedicated Standalone Sign In & Register Page Aesthetics (SEC-001) - Light UI
+   ========================================================================== */
+.auth-screen-view {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 50%, #E2E8F0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.auth-screen-ambient-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: 
+    radial-gradient(circle at 14% 18%, rgba(37, 211, 102, 0.12) 0%, transparent 48%),
+    radial-gradient(circle at 86% 82%, rgba(59, 130, 246, 0.09) 0%, transparent 48%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.6) 0%, transparent 100%);
+}
+
+.auth-screen-card {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 24px;
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 20px 45px -12px rgba(15, 23, 42, 0.08), 0 4px 12px -2px rgba(15, 23, 42, 0.03), 0 0 0 1px rgba(226, 232, 240, 0.6);
+  padding: 34px 30px 26px;
   position: relative;
+  z-index: 2;
   overflow: hidden;
+  box-sizing: border-box;
+  animation: authCardEntrance 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-@keyframes authCardEntrance {
-  0% {
-    opacity: 0;
-    transform: translateY(24px) scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-#authModal .modal-card::before {
+.auth-screen-card::before {
   content: "";
   position: absolute;
   top: 0;
@@ -2265,6 +2399,62 @@ textarea {
   background: linear-gradient(90deg, #10B981, #25D366, #3B82F6, #10B981);
   background-size: 300% 100%;
   animation: authShimmerBar 4s linear infinite;
+}
+
+/* Header Quick Sign-Out Button */
+.header-signout-btn {
+  color: var(--text-secondary);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-signout-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.3);
+  transform: translateY(-1px);
+}
+
+.header-signout-btn:active {
+  transform: scale(0.95);
+}
+
+/* Elevated Sign-Out Button in Device Card */
+.btn-danger-signout {
+  background: #FEF2F2 !important;
+  color: #DC2626 !important;
+  border: 1.5px solid #FCA5A5 !important;
+  border-radius: 12px !important;
+  font-weight: 700 !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.08) !important;
+}
+
+[data-theme="dark"] .btn-danger-signout {
+  background: rgba(220, 38, 38, 0.15) !important;
+  color: #F87171 !important;
+  border-color: rgba(248, 113, 113, 0.3) !important;
+}
+
+.btn-danger-signout:hover {
+  background: #FEE2E2 !important;
+  border-color: #EF4444 !important;
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.18) !important;
+}
+
+.btn-danger-signout:active {
+  transform: scale(0.98);
+}
+
+@keyframes authCardEntrance {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes authShimmerBar {
@@ -2277,49 +2467,162 @@ textarea {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 
 .auth-brand-badge {
-  width: 50px;
-  height: 50px;
-  border-radius: 15px;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
   background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #FFFFFF;
-  box-shadow: 0 10px 20px -4px rgba(37, 211, 102, 0.4);
-  margin-bottom: 12px;
+  box-shadow: 0 10px 22px -4px rgba(37, 211, 102, 0.38);
+  margin-bottom: 14px;
   animation: authBadgePulse 3.2s ease-in-out infinite;
 }
 
 @keyframes authBadgePulse {
   0%, 100% {
     transform: scale(1);
-    box-shadow: 0 10px 20px -4px rgba(37, 211, 102, 0.4);
+    box-shadow: 0 10px 22px -4px rgba(37, 211, 102, 0.38);
   }
   50% {
     transform: scale(1.05);
-    box-shadow: 0 14px 26px -2px rgba(37, 211, 102, 0.55);
+    box-shadow: 0 14px 28px -2px rgba(37, 211, 102, 0.52);
   }
 }
 
 .auth-modal-title {
-  font-family: var(--font-display);
-  font-size: 20px;
+  font-family: var(--font-display, inherit);
+  font-size: 22px;
   font-weight: 800;
-  color: var(--text-main);
+  color: #0F172A !important;
   margin: 0 0 6px 0;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 .auth-modal-desc {
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.45;
+  font-size: 13.5px;
+  color: #64748B !important;
+  line-height: 1.48;
   margin: 0;
-  max-width: 330px;
+  max-width: 320px;
+}
+
+.auth-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #475569 !important;
+  margin-bottom: 7px;
+}
+
+.auth-input-field {
+  width: 100%;
+  padding: 13px 15px;
+  font-size: 15px;
+  line-height: 1.4;
+  border-radius: 12px;
+  border: 1.5px solid #CBD5E1 !important;
+  background: #F8FAFC !important;
+  color: #0F172A !important;
+  box-sizing: border-box;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: inherit;
+}
+
+.auth-input-field::placeholder {
+  color: #94A3B8 !important;
+  opacity: 1;
+}
+
+.auth-input-field:focus {
+  background: #FFFFFF !important;
+  border-color: #25D366 !important;
+  box-shadow: 0 0 0 4px rgba(37, 211, 102, 0.15) !important;
+  color: #0F172A !important;
+}
+
+.auth-input-with-action {
+  padding-right: 48px !important;
+}
+
+.auth-toggle-pwd-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 8px;
+  color: #64748B;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.auth-toggle-pwd-btn:hover {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+#authSubmitBtn.btn-primary {
+  width: 100%;
+  justify-content: center;
+  padding: 14px 18px;
+  font-size: 15.5px;
+  font-weight: 700;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+  box-shadow: 0 8px 20px -3px rgba(37, 211, 102, 0.42) !important;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#authSubmitBtn.btn-primary:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 12px 25px -3px rgba(37, 211, 102, 0.52) !important;
+  filter: brightness(1.02);
+}
+
+#authSubmitBtn.btn-primary:active {
+  transform: scale(0.98);
+}
+
+#authToggleModeLink {
+  color: #059669 !important;
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+#authToggleModeLink:hover {
+  color: #047857 !important;
+  text-decoration: underline;
+}
+
+#authErrorMsg {
+  display: none;
+  color: #DC2626 !important;
+  font-size: 13px;
+  margin-bottom: 14px;
+  font-weight: 600;
+  padding: 11px 13px;
+  background: #FEF2F2 !important;
+  border-radius: 10px;
+  border: 1px solid #FECACA !important;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.05);
 }
 
 .auth-confirm-group {
