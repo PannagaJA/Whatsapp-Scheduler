@@ -72,7 +72,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const pairCodeResult = document.getElementById("pairCodeResult");
 
   // DOM Elements - Auth Modal (SEC-001)
-  const authModal = document.getElementById("authModal");
+  const authScreenView = document.getElementById("authScreenView") || document.getElementById("authModal");
+  const authModal = authScreenView;
+  const appContainer = document.querySelector(".app-container");
   const authModalTitle = document.getElementById("authModalTitle");
   const authModalDesc = document.getElementById("authModalDesc");
   const authForm = document.getElementById("authForm");
@@ -168,6 +170,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showAuthModal() {
     if (!authModal) return;
+    if (appContainer) appContainer.style.display = "none";
+    document.body.classList.add("unauthenticated");
     authModal.style.display = "flex";
     authModal.classList.add("active");
     if (authPasswordInput) authPasswordInput.type = "password";
@@ -187,6 +191,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function hideAuthModal() {
+    document.body.classList.remove("unauthenticated");
+    if (appContainer) appContainer.style.display = "flex";
     if (authModal) {
       authModal.classList.remove("active");
       authModal.style.display = "none";
@@ -331,7 +337,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (authErrorMsg) {
             authErrorMsg.textContent = "Passwords do not match. Please verify your password.";
             authErrorMsg.style.display = "block";
-            const card = authModal ? authModal.querySelector(".modal-card") : null;
+            const card = authModal ? (authModal.querySelector(".auth-screen-card") || authModal.querySelector(".modal-card")) : null;
             if (card) {
               card.classList.remove("auth-shake");
               void card.offsetWidth;
@@ -376,7 +382,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (authErrorMsg) {
             authErrorMsg.textContent = data.error || "Authentication failed. Please check credentials.";
             authErrorMsg.style.display = "block";
-            const card = authModal ? authModal.querySelector(".modal-card") : null;
+            const card = authModal ? (authModal.querySelector(".auth-screen-card") || authModal.querySelector(".modal-card")) : null;
             if (card) {
               card.classList.remove("auth-shake");
               void card.offsetWidth;
@@ -388,7 +394,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (authErrorMsg) {
           authErrorMsg.textContent = "Network error connecting to server.";
           authErrorMsg.style.display = "block";
-          const card = authModal ? authModal.querySelector(".modal-card") : null;
+          const card = authModal ? (authModal.querySelector(".auth-screen-card") || authModal.querySelector(".modal-card")) : null;
           if (card) {
             card.classList.remove("auth-shake");
             void card.offsetWidth;
@@ -401,25 +407,124 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  const headerSignOutBtn = document.getElementById("headerSignOutBtn");
+
+  // Universal Custom Confirmation Modal Dialog
+  function showConfirmDialog(options = {}) {
+    const {
+      title = "Confirm Action",
+      message = "Are you sure you want to proceed?",
+      confirmText = "Confirm",
+      cancelText = "Cancel",
+      isDanger = true,
+      icon = "logout" // "logout" | "warning"
+    } = options;
+
+    return new Promise((resolve) => {
+      const modal = document.getElementById("confirmActionModal");
+      const titleEl = document.getElementById("confirmModalTitle");
+      const msgEl = document.getElementById("confirmModalMessage");
+      const confirmBtn = document.getElementById("confirmModalConfirmBtn");
+      const cancelBtn = document.getElementById("confirmModalCancelBtn");
+      const iconLogout = document.getElementById("confirmIconLogout");
+      const iconWarning = document.getElementById("confirmIconWarning");
+      const iconBadge = document.getElementById("confirmModalIconBadge");
+
+      if (!modal) {
+        return resolve(window.confirm(message));
+      }
+
+      if (titleEl) titleEl.textContent = title;
+      if (msgEl) msgEl.textContent = message;
+      if (confirmBtn) {
+        confirmBtn.textContent = confirmText;
+        confirmBtn.className = isDanger ? "btn-danger confirm-btn-confirm" : "btn-primary confirm-btn-confirm";
+      }
+      if (cancelBtn) cancelBtn.textContent = cancelText;
+
+      if (iconBadge) {
+        iconBadge.className = `confirm-icon-badge ${isDanger ? "danger" : "primary"}`;
+      }
+      if (iconLogout && iconWarning) {
+        if (icon === "logout") {
+          iconLogout.style.display = "block";
+          iconWarning.style.display = "none";
+        } else {
+          iconLogout.style.display = "none";
+          iconWarning.style.display = "block";
+        }
+      }
+
+      function cleanup(result) {
+        modal.classList.remove("active");
+        modal.style.display = "none";
+        if (confirmBtn) confirmBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        modal.onclick = null;
+        document.removeEventListener("keydown", handleKeydown);
+        resolve(result);
+      }
+
+      function handleKeydown(e) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cleanup(false);
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          cleanup(true);
+        }
+      }
+
+      if (confirmBtn) confirmBtn.onclick = () => cleanup(true);
+      if (cancelBtn) cancelBtn.onclick = () => cleanup(false);
+
+      modal.onclick = (e) => {
+        if (e.target === modal) cleanup(false);
+      };
+
+      document.addEventListener("keydown", handleKeydown);
+
+      modal.style.display = "flex";
+      modal.classList.add("active");
+      if (cancelBtn) cancelBtn.focus();
+    });
+  }
+
+  async function performApplicationLogout(e) {
+    if (e && typeof e.preventDefault === "function") e.preventDefault();
+    if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+    const confirmed = await showConfirmDialog({
+      title: "Sign Out",
+      message: "Are you sure you want to sign out of this application account?",
+      confirmText: "Sign Out",
+      cancelText: "Cancel",
+      isDanger: true,
+      icon: "logout"
+    });
+    if (!confirmed) return;
+    authGeneration++;
+    try {
+      await authFetch("/api/auth/logout", { method: "POST" });
+    } catch (_) {}
+    csrfToken = "";
+    authToken = "";
+    currentUser = null;
+    try {
+      localStorage.removeItem("wa_auth_token");
+      localStorage.removeItem("wa_current_user");
+      localStorage.removeItem("wa_phonebook_synced");
+    } catch (_) {}
+    updateCurrentUserDisplay();
+    showToast("✓ Signed out of application");
+    showAuthModal();
+  }
+
   if (btnSignOutApp) {
-    btnSignOutApp.onclick = async () => {
-      if (!confirm("Are you sure you want to sign out of this application account?")) return;
-      authGeneration++;
-      try {
-        await authFetch("/api/auth/logout", { method: "POST" });
-      } catch (_) {}
-      csrfToken = "";
-      authToken = "";
-      currentUser = null;
-      try {
-        localStorage.removeItem("wa_auth_token");
-        localStorage.removeItem("wa_current_user");
-        localStorage.removeItem("wa_phonebook_synced");
-      } catch (_) {}
-      updateCurrentUserDisplay();
-      showToast("Signed out of application");
-      showAuthModal();
-    };
+    btnSignOutApp.addEventListener("click", performApplicationLogout);
+  }
+
+  if (headerSignOutBtn) {
+    headerSignOutBtn.addEventListener("click", performApplicationLogout);
   }
 
   // Resilient Auth Verification across server restarts, reboots & network reconnection
@@ -951,13 +1056,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // DPDP Act & Privacy Notice Consent Flow (SEC-013)
-    const consent = confirm(
-      "📋 Privacy Notice & Contact Sync Consent:\n\n" +
-      "By synchronizing your device contacts, contact names and phone numbers will be uploaded and stored securely in your private, isolated account for recipient selection.\n\n" +
-      "• Your contact data is strictly isolated to your account and never shared.\n" +
-      "• You may permanently erase your synced contacts anytime using the Erase button.\n\n" +
-      "Do you consent to synchronizing your contacts?"
-    );
+    const consent = await showConfirmDialog({
+      title: "Privacy Notice & Contact Sync Consent",
+      message: "By synchronizing your device contacts, contact names and phone numbers will be uploaded and stored securely in your private, isolated account for recipient selection. Your data is strictly isolated and can be erased anytime. Do you consent?",
+      confirmText: "Agree & Sync",
+      cancelText: "Cancel",
+      isDanger: false,
+      icon: "warning"
+    });
     if (!consent) return;
 
     if (window.AndroidNative && typeof window.AndroidNative.importAllContacts === "function") {
@@ -1016,13 +1122,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const eraseContactsBtn = document.getElementById("eraseContactsBtn");
   if (eraseContactsBtn) {
     eraseContactsBtn.onclick = async () => {
-      const confirmDelete = confirm(
-        "⚠️ Erase Synced Contacts?\n\n" +
-        "Are you sure you want to permanently erase all synchronized contacts from your account?\n\n" +
-        "• All imported contact names and phone numbers will be deleted from the database.\n" +
-        "• Your scheduled messages will NOT be affected.\n\n" +
-        "This action cannot be undone."
-      );
+      const confirmDelete = await showConfirmDialog({
+        title: "Erase Synced Contacts",
+        message: "Are you sure you want to permanently erase all synchronized contacts from your account? This action cannot be undone.",
+        confirmText: "Erase Contacts",
+        cancelText: "Cancel",
+        isDanger: true,
+        icon: "warning"
+      });
       if (!confirmDelete) return;
 
       try {
@@ -1456,7 +1563,15 @@ document.addEventListener("DOMContentLoaded", () => {
       if (hasHistorical) {
         clearHistoryBtn.style.display = "inline-flex";
         clearHistoryBtn.onclick = async () => {
-          if (!confirm("Clear all completed and failed message history from the queue?")) return;
+          const ok = await showConfirmDialog({
+            title: "Clear History",
+            message: "Clear all completed and failed message history from the queue?",
+            confirmText: "Clear History",
+            cancelText: "Cancel",
+            isDanger: true,
+            icon: "warning"
+          });
+          if (!ok) return;
           const toDelete = uniqueSchedules.filter(s => s.status === "sent" || s.status === "failed");
           try {
             await Promise.all(toDelete.map(s => authFetch(`/api/schedules/${s.id}`, { method: "DELETE" })));
@@ -1543,7 +1658,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteSchedule(id) {
-    if (!confirm("Are you sure you want to delete this scheduled message?")) return;
+    const ok = await showConfirmDialog({
+      title: "Delete Message",
+      message: "Are you sure you want to delete this scheduled message from the queue?",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      isDanger: true,
+      icon: "warning"
+    });
+    if (!ok) return;
     try {
       const res = await authFetch(`/api/schedules/${id}`, { method: "DELETE" });
       const data = await res.json();
@@ -2115,7 +2238,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // 14. Logout Handler
   if (logoutBtn) {
     logoutBtn.onclick = async () => {
-      if (!confirm("Are you sure you want to unlink this WhatsApp account?")) return;
+      const ok = await showConfirmDialog({
+        title: "Unlink WhatsApp",
+        message: "Are you sure you want to unlink this WhatsApp account? You will need to re-link using QR code or pairing code.",
+        confirmText: "Unlink Account",
+        cancelText: "Cancel",
+        isDanger: true,
+        icon: "warning"
+      });
+      if (!ok) return;
       try {
         logoutBtn.disabled = true;
         logoutBtn.textContent = "Unlinking…";
@@ -2613,10 +2744,15 @@ document.addEventListener("DOMContentLoaded", () => {
         adminUserListContainer.querySelectorAll(".btn-delete-user").forEach(btn => {
           btn.addEventListener("click", async () => {
             const uid = btn.getAttribute("data-user-id");
-            const uname = btn.getAttribute("data-username");
-            if (!confirm(`Are you sure you want to delete user "${uname}"?\n\nThis will wipe all their WhatsApp sessions, scheduled messages, contacts, and uploaded attachments.`)) {
-              return;
-            }
+            const ok = await showConfirmDialog({
+              title: "Delete User",
+              message: `Are you sure you want to delete user "${uname}"? This will wipe all their WhatsApp sessions, scheduled messages, contacts, and uploaded attachments.`,
+              confirmText: "Delete User",
+              cancelText: "Cancel",
+              isDanger: true,
+              icon: "warning"
+            });
+            if (!ok) return;
 
             btn.disabled = true;
             btn.textContent = "Deleting…";
