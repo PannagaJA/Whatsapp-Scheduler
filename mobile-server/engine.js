@@ -109,7 +109,7 @@ class UserWhatsAppSession {
       if (fs.existsSync(credsFile)) {
         try {
           const raw = readDecryptedJson(credsFile, encryptionKey);
-          if (raw && raw.me && !raw.registered) {
+          if (raw && raw.me && !raw.registered && !raw.account) {
             delete raw.me;
             delete raw.pairingCode;
             writeEncryptedJson(credsFile, raw, encryptionKey);
@@ -141,7 +141,9 @@ class UserWhatsAppSession {
         auth: state,
         browser: Browsers.ubuntu("Chrome"),
         syncFullHistory: process.env.WA_SYNC_FULL_HISTORY === "true",
-        generateHighQualityLinkPreview: true
+        generateHighQualityLinkPreview: true,
+        qrTimeout: 180000,
+        connectTimeoutMs: 60000
       });
 
       const currentSock = this.sock;
@@ -459,6 +461,12 @@ class UserWhatsAppSession {
       phonebookImported = setting ? setting.value === "1" : false;
     } catch (_) {}
 
+    const hasSavedSession = Boolean(
+      this.userProfile || 
+      this.sock?.authState?.creds?.registered || 
+      (fs.existsSync(path.join(this.authDir, "creds.json")) && !this.isExplicitlyLoggedOut)
+    );
+
     return {
       status: this.connectionStatus,
       syncing: this.isSyncing && count === 0,
@@ -467,6 +475,7 @@ class UserWhatsAppSession {
       phonebookImported: phonebookImported && phonebookCount > 0,
       qr: this.currentQr,
       error: this._lastInitError ? this._lastInitError.message : null,
+      hasSavedSession: hasSavedSession,
       user: this.userProfile ? {
         id: this.userProfile.id,
         name: this.userProfile.name || this.userProfile.id?.split(":")[0] || "My WhatsApp"
@@ -598,8 +607,26 @@ class UserWhatsAppSession {
     // Wait for any in-progress initialization before continuing
     await this.waitForInitialization();
 
-    // Ensure we have an active, initialized socket
-    if (!this.sock || this.connectionStatus === "disconnected" || !this.sock.ws) {
+    const isActivelyConnected = this.connectionStatus === "connected" && this.sock?.ws?.isOpen;
+    if (isActivelyConnected) {
+      throw new Error("WhatsApp is already actively connected on this account. Please unlink your account first if you want to pair a different device.");
+    }
+
+    // If session is disconnected/offline but stale credentials exist on disk or in memory,
+    // the user is requesting to pair/re-pair. Cleanly reset the stale session so fresh companion pairing can proceed.
+    const hasStaleSession = Boolean(this.sock?.authState?.creds?.registered || this.userProfile || fs.existsSync(credsFile));
+    const isDirtySocket = Boolean(this.sock?.authState?.creds?.pairingCode || (this.sock?.authState?.creds?.me && !this.sock?.authState?.creds?.registered));
+
+    if (!isActivelyConnected && (hasStaleSession || isDirtySocket || !this.sock || this.connectionStatus === "disconnected" || !this.sock.ws)) {
+      if (hasStaleSession) {
+        try {
+          if (this.sock) {
+            this.sock.end(new Error("Resetting stale session for fresh pairing"));
+            this.sock = null;
+          }
+          fs.rmSync(this.authDir, { recursive: true, force: true });
+        } catch (_) {}
+      }
       await this.init(true);
     }
 
@@ -629,7 +656,7 @@ class UserWhatsAppSession {
       throw new Error(getInitErrorMessage());
     }
 
-    if (this.sock.authState?.creds?.registered) {
+    if (this.sock.authState?.creds?.registered && this.connectionStatus === "connected") {
       throw new Error("WhatsApp is already registered/linked on this account.");
     }
 
@@ -638,14 +665,14 @@ class UserWhatsAppSession {
       return code;
     } catch (err) {
       // Revert incomplete credentials so auth directory isn't left corrupted for future QR/pairing attempts
-      if (this.sock?.authState?.creds?.me && !this.sock?.authState?.creds?.registered) {
+      if (this.sock?.authState?.creds?.me && !this.sock?.authState?.creds?.registered && !this.sock?.authState?.creds?.account) {
         delete this.sock.authState.creds.me;
         delete this.sock.authState.creds.pairingCode;
         if (fs.existsSync(credsFile)) {
           try {
             const encryptionKey = getSessionEncryptionKey();
             const raw = readDecryptedJson(credsFile, encryptionKey);
-            if (raw && raw.me && !raw.registered) {
+            if (raw && raw.me && !raw.registered && !raw.account) {
               delete raw.me;
               delete raw.pairingCode;
               writeEncryptedJson(credsFile, raw, encryptionKey);
