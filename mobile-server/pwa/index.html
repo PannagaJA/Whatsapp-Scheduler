@@ -20,7 +20,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="/style.css?v=3.7">
+  <link rel="stylesheet" href="/style.css?v=4.1">
 </head>
 <body>
   <!-- DailyFlutterUI Inspired Animated App Splash Screen -->
@@ -106,6 +106,14 @@
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </button>
+
+        <button type="button" class="header-circle-btn header-signout-btn" id="headerSignOutBtn" title="Sign Out of Application" aria-label="Sign Out of Application">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
           </svg>
         </button>
 
@@ -570,15 +578,18 @@
               <div id="currentUserRole" class="user-account-role">Role: <span id="currentUserRoleText">User</span></div>
             </div>
           </div>
-          <div class="signout-box">
-            <button type="button" class="btn-signout" id="btnSignOutApp">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <div class="signout-box" style="margin-top: 18px;">
+            <button type="button" class="btn-signout btn-danger-signout" id="btnSignOutApp">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
                 <polyline points="16 17 21 12 16 7"></polyline>
                 <line x1="21" y1="12" x2="9" y2="12"></line>
               </svg>
               <span>Sign Out of Application</span>
             </button>
+            <div style="font-size: 11.5px; color: var(--text-muted); text-align: center; margin-top: 8px;">
+              Terminates your active login session on this device securely.
+            </div>
           </div>
         </div>
 
@@ -779,30 +790,59 @@
     </div>
   </div>
 
-  <!-- Application Authentication Modal (SEC-001) -->
-  <div class="modal-overlay" id="authModal" style="z-index: 9999;">
-    <div class="modal-card">
+  <!-- Universal Custom Confirmation Dialog Modal -->
+  <div class="modal-overlay" id="confirmActionModal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+    <div class="modal-card confirm-modal-card" id="confirmModalCard">
+      <div class="confirm-modal-visual">
+        <div class="confirm-icon-badge danger" id="confirmModalIconBadge">
+          <svg id="confirmIconLogout" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <svg id="confirmIconWarning" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
+      </div>
+      <div class="confirm-modal-content">
+        <h3 id="confirmModalTitle" class="confirm-modal-title">Sign Out</h3>
+        <p id="confirmModalMessage" class="confirm-modal-message">Are you sure you want to sign out of this application account?</p>
+      </div>
+      <div class="confirm-modal-actions">
+        <button type="button" class="btn-secondary confirm-btn-cancel" id="confirmModalCancelBtn">Cancel</button>
+        <button type="button" class="btn-danger confirm-btn-confirm" id="confirmModalConfirmBtn">Sign Out</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dedicated Standalone Application Authentication Page (SEC-001) -->
+  <section class="auth-screen-view" id="authScreenView" style="display: none;" aria-label="Sign In to WhatsApp Scheduler">
+    <div class="auth-screen-ambient-bg"></div>
+    <div class="auth-screen-card">
       <div class="auth-header-visual">
         <div class="auth-brand-badge">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             <polyline points="9 11 12 14 22 4"></polyline>
           </svg>
         </div>
-        <h3 id="authModalTitle" class="auth-modal-title">Sign In</h3>
-        <p class="auth-modal-desc" id="authModalDesc">Please sign in with your application credentials to continue:</p>
+        <h2 id="authModalTitle" class="auth-modal-title">Sign In</h2>
+        <p class="auth-modal-desc" id="authModalDesc">Enter your workspace account credentials to access WhatsApp Scheduler:</p>
       </div>
-      <div class="modal-body" style="padding: 0;">
+      <div class="auth-screen-body">
         <form id="authForm" onsubmit="return false;">
-          <div class="form-group" style="margin-bottom: 12px;">
-            <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Username</label>
-            <input type="text" id="authUsernameInput" class="auth-input-field" required autocomplete="username" placeholder="Enter username" style="width: 100%; padding: 12px 14px; font-size: 15px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--input-bg); color: var(--text-main);">
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="auth-label">Username</label>
+            <input type="text" id="authUsernameInput" class="auth-input-field" required autocomplete="username" placeholder="Enter username">
           </div>
-          <div class="form-group" style="margin-bottom: 14px;">
-            <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Password</label>
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="auth-label">Password</label>
             <div class="password-input-wrap" style="position: relative; display: flex; align-items: center;">
-              <input type="password" id="authPasswordInput" class="auth-input-field" required autocomplete="current-password" placeholder="Enter password (min 6 chars)" style="width: 100%; padding: 12px 42px 12px 14px; font-size: 15px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--input-bg); color: var(--text-main);">
-              <button type="button" class="btn-toggle-password" id="btnToggleAuthPassword" aria-label="Toggle password visibility" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
+              <input type="password" id="authPasswordInput" class="auth-input-field auth-input-with-action" required autocomplete="current-password" placeholder="Enter password (min 6 chars)">
+              <button type="button" class="btn-toggle-password auth-toggle-pwd-btn" id="btnToggleAuthPassword" aria-label="Toggle password visibility">
                 <svg id="eyeIconOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
                   <circle cx="12" cy="12" r="3"/>
@@ -818,10 +858,10 @@
           </div>
           <!-- Confirm Password (Shown during Register mode) -->
           <div class="form-group auth-confirm-group hidden" id="authConfirmPasswordGroup">
-            <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Confirm Password</label>
+            <label class="auth-label">Confirm Password</label>
             <div class="password-input-wrap" style="position: relative; display: flex; align-items: center;">
-              <input type="password" id="authConfirmPasswordInput" class="auth-input-field" autocomplete="new-password" placeholder="Confirm your password" style="width: 100%; padding: 12px 42px 12px 14px; font-size: 15px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--input-bg); color: var(--text-main);">
-              <button type="button" class="btn-toggle-password" id="btnToggleAuthConfirmPassword" aria-label="Toggle confirm password visibility" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 6px; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px;">
+              <input type="password" id="authConfirmPasswordInput" class="auth-input-field auth-input-with-action" autocomplete="new-password" placeholder="Confirm your password">
+              <button type="button" class="btn-toggle-password auth-toggle-pwd-btn" id="btnToggleAuthConfirmPassword" aria-label="Toggle confirm password visibility">
                 <svg id="eyeIconOpenConfirm" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
                   <circle cx="12" cy="12" r="3"/>
@@ -835,17 +875,17 @@
               </button>
             </div>
           </div>
-          <div id="authErrorMsg" style="display: none; color: #ff6b6b; font-size: 13px; margin-bottom: 12px; font-weight: 500;"></div>
-          <button type="submit" class="btn-primary" id="authSubmitBtn" style="width: 100%; justify-content: center; padding: 12px; font-size: 15px;">
+          <div id="authErrorMsg"></div>
+          <button type="submit" class="btn-primary" id="authSubmitBtn">
             <span id="authSubmitText">Sign In</span>
           </button>
-          <div style="margin-top: 14px; text-align: center; font-size: 13px;">
-            <a href="#" id="authToggleModeLink" style="color: var(--accent); text-decoration: none; font-weight: 500;">Don't have an account? Register</a>
+          <div style="margin-top: 18px; text-align: center; font-size: 13.5px;">
+            <a href="#" id="authToggleModeLink">Don't have an account? Register</a>
           </div>
         </form>
       </div>
     </div>
-  </div>
+  </section>
 
   <!-- Interactive Spotlight Tour Guide -->
   <div id="tourSpotlightOverlay" class="tour-spotlight-overlay" style="display: none;" aria-hidden="true">
@@ -889,6 +929,6 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
-  <script src="/app.js?v=3.4"></script>
+  <script src="/app.js?v=3.7"></script>
 </body>
 </html>
