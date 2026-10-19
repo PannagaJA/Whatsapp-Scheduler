@@ -238,7 +238,10 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
             </div>
             <button type="button" class="wa-composer-input-fake" id="btnHeroAddSchedule" title="Click to schedule new message">
-              <span>Schedule a message…</span>
+              <span class="wa-composer-placeholder-wrap">
+                <span class="wa-composer-text">Schedule a message…</span>
+                <span class="wa-typing-cursor" aria-hidden="true"></span>
+              </span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             </button>
             <button type="button" class="wa-composer-send-btn" aria-label="Quick Action" onclick="document.getElementById('recipientInput')?.focus()">
