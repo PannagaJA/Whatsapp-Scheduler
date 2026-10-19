@@ -101,6 +101,14 @@
           <span class="header-notif-dot" id="headerNotifDot"></span>
         </button>
 
+        <button type="button" class="header-circle-btn" id="btnStartTour" title="Take Interactive Tour" aria-label="Take Interactive Tour">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </button>
+
         <button type="button" class="header-avatar-btn" id="headerAvatarBtn" title="Account Details">
           <div class="header-avatar-circle">
             <span id="headerAvatarInitial">U</span>
@@ -728,7 +736,7 @@
 
   <!-- 8-Digit Pairing Code Modal -->
   <div class="modal-overlay" id="pairModal">
-    <div class="modal-card">
+    <div class="modal-card" id="pairModalCard">
       <div class="modal-head">
         <h3>8-Digit Pairing Code</h3>
         <button type="button" class="modal-close" id="pairModalClose" aria-label="Close" style="display: inline-flex; align-items: center; justify-content: center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
@@ -835,6 +843,45 @@
             <a href="#" id="authToggleModeLink" style="color: var(--accent); text-decoration: none; font-weight: 500;">Don't have an account? Register</a>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Spotlight Tour Guide -->
+  <div id="tourSpotlightOverlay" class="tour-spotlight-overlay" style="display: none;" aria-hidden="true">
+    <svg class="tour-spotlight-svg" width="100%" height="100%">
+      <defs>
+        <mask id="tourSpotlightMask">
+          <rect x="0" y="0" width="100%" height="100%" fill="white" />
+          <rect id="tourSpotlightCutout" x="0" y="0" width="0" height="0" rx="14" ry="14" fill="black" />
+        </mask>
+      </defs>
+      <rect x="0" y="0" width="100%" height="100%" fill="rgba(15, 23, 42, 0.72)" mask="url(#tourSpotlightMask)" />
+    </svg>
+    <div id="tourHighlightGlow" class="tour-highlight-glow"></div>
+    <div id="tourTooltipCard" class="tour-tooltip-card" role="dialog" aria-modal="true">
+      <div class="tour-tooltip-header">
+        <span class="tour-step-badge" id="tourStepBadge">Step 1 of 4</span>
+        <button type="button" class="tour-btn-close" id="tourBtnClose" aria-label="Close Tour">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <h3 class="tour-tooltip-title" id="tourTooltipTitle">Link Your WhatsApp</h3>
+      <p class="tour-tooltip-desc" id="tourTooltipDesc">Connect WhatsApp via QR code or 8-digit pairing code to start dispatching scheduled messages 24/7.</p>
+      <div class="tour-tooltip-footer">
+        <div class="tour-dots-indicator" id="tourDotsIndicator">
+          <span class="tour-dot active"></span>
+          <span class="tour-dot"></span>
+          <span class="tour-dot"></span>
+          <span class="tour-dot"></span>
+        </div>
+        <div class="tour-nav-buttons">
+          <button type="button" class="tour-btn-prev" id="tourBtnPrev">Back</button>
+          <button type="button" class="tour-btn-next" id="tourBtnNext">Next</button>
+        </div>
       </div>
     </div>
   </div>
