@@ -166,7 +166,12 @@ class UserWhatsAppSession {
           return;
         }
 
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect, qr, isNewLogin } = update;
+
+        if (isNewLogin) {
+          this.connectionStatus = "connecting";
+          this.currentQr = null;
+        }
 
         if (connection === "connecting") {
           this.connectionStatus = "connecting";
@@ -187,7 +192,7 @@ class UserWhatsAppSession {
           // Only true loggedOut (401) is treated as a potential phone-side unlink.
           // badSession (500), multideviceMismatch, 403, 408, 428 are transient network/server glitches and MUST reconnect.
           const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401) && !isRestartRequired;
-          const wasRegistered = Boolean(this.userProfile || currentSock.authState?.creds?.registered);
+          const wasRegistered = Boolean(this.userProfile || currentSock.authState?.creds?.registered || currentSock.authState?.creds?.account || currentSock.authState?.creds?.me);
 
           // Retry on unexpected 401 disconnects across server restarts before wiping credentials
           if (isLoggedOut && wasRegistered) {
@@ -252,7 +257,7 @@ class UserWhatsAppSession {
         } else if (connection === "open") {
           this.connectionStatus = "connected";
           this.currentQr = null;
-          this.userProfile = this.sock.user;
+          this.userProfile = this.sock.user || this.sock.authState?.creds?.me;
           this._loggedOutRetryCount = 0;
           console.log(`[WhatsApp Engine ${this.userId}] Connected successfully as: ${this.userProfile?.name || this.userProfile?.id}`);
 
@@ -476,9 +481,9 @@ class UserWhatsAppSession {
       qr: this.currentQr,
       error: this._lastInitError ? this._lastInitError.message : null,
       hasSavedSession: hasSavedSession,
-      user: this.userProfile ? {
-        id: this.userProfile.id,
-        name: this.userProfile.name || this.userProfile.id?.split(":")[0] || "My WhatsApp"
+      user: (this.userProfile || this.sock?.authState?.creds?.me) ? {
+        id: (this.userProfile || this.sock?.authState?.creds?.me).id,
+        name: (this.userProfile || this.sock?.authState?.creds?.me).name || (this.userProfile || this.sock?.authState?.creds?.me).id?.split(":")[0] || "My WhatsApp"
       } : null
     };
   }
@@ -612,22 +617,33 @@ class UserWhatsAppSession {
       throw new Error("WhatsApp is already actively connected on this account. Please unlink your account first if you want to pair a different device.");
     }
 
-    // If session is disconnected/offline but stale credentials exist on disk or in memory,
-    // the user is requesting to pair/re-pair. Cleanly reset the stale session so fresh companion pairing can proceed.
-    const hasStaleSession = Boolean(this.sock?.authState?.creds?.registered || this.userProfile || fs.existsSync(credsFile));
-    const isDirtySocket = Boolean(this.sock?.authState?.creds?.pairingCode || (this.sock?.authState?.creds?.me && !this.sock?.authState?.creds?.registered));
+    // Only wipe when resetting an actual previously linked account.
+    // For pending/unlinked pairing attempts, preserve stable client keys (registrationId & identityKey).
+    // Reusing stable client keys prevents WhatsApp from flagging the companion client as spam and ensures
+    // the push notification ("Are you trying to link a device?") is reliably delivered to the phone.
+    const hasPreviousLinkedAccount = Boolean(
+      this.sock?.authState?.creds?.registered ||
+      this.sock?.authState?.creds?.account ||
+      this.userProfile
+    );
 
-    if (!isActivelyConnected && (hasStaleSession || isDirtySocket || !this.sock || this.connectionStatus === "disconnected" || !this.sock.ws)) {
-      if (hasStaleSession) {
-        try {
-          if (this.sock) {
-            this.sock.end(new Error("Resetting stale session for fresh pairing"));
-            this.sock = null;
-          }
-          fs.rmSync(this.authDir, { recursive: true, force: true });
-        } catch (_) {}
-      }
+    if (hasPreviousLinkedAccount && !isActivelyConnected) {
+      try {
+        if (this.sock) {
+          this.sock.end(new Error("Resetting previous linked account for fresh pairing"));
+          this.sock = null;
+        }
+        fs.rmSync(this.authDir, { recursive: true, force: true });
+      } catch (_) {}
       await this.init(true);
+    } else if (!this.sock || !this.sock.ws || this.connectionStatus === "disconnected") {
+      await this.init(false);
+    } else {
+      // Re-use current socket & stable identity keys! Clear transient pairing fields so a fresh code can be requested
+      if (this.sock?.authState?.creds) {
+        delete this.sock.authState.creds.me;
+        delete this.sock.authState.creds.pairingCode;
+      }
     }
 
     const getInitErrorMessage = () => {
