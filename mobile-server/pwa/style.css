@@ -935,6 +935,37 @@ body {
   transform: scale(0.99);
 }
 
+.wa-composer-placeholder-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5px;
+  user-select: none;
+}
+
+.wa-composer-text {
+  line-height: 1;
+}
+
+.wa-typing-cursor {
+  display: inline-block;
+  width: 1.75px;
+  height: 14px;
+  background-color: #00A884;
+  border-radius: 1px;
+  margin-left: 1.5px;
+  animation: waCursorBlink 1s infinite;
+  vertical-align: middle;
+}
+
+@keyframes waCursorBlink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
 .wa-composer-send-btn {
   width: 38px;
   height: 38px;
@@ -1075,6 +1106,10 @@ body {
 [data-theme="dark"] .wa-composer-input-fake:hover {
   background: #32434D;
   color: #E9EDEF;
+}
+
+[data-theme="dark"] .wa-typing-cursor {
+  background-color: #00A884;
 }
 
 /* ==========================================================================
