@@ -2655,9 +2655,14 @@ textarea {
   border-radius: var(--radius-lg);
   padding: 16px;
   margin-bottom: 16px;
-  display: flex !important;
-  flex-direction: column !important;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+}
+
+.wa-not-connected-card.hidden,
+.wa-not-connected-card[style*="display: none"] {
+  display: none !important;
 }
 
 .wa-card-header {
