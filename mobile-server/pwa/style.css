@@ -1569,34 +1569,155 @@ textarea {
   background: #FECACA;
 }
 
-/* Suggestions Dropdown */
+/* Suggestions Dropdown (Contact Autocomplete) */
 .suggestions-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 4px);
   left: 0;
   right: 0;
-  z-index: 50;
+  z-index: 100;
   background: var(--bg-card);
   border: 1px solid var(--border-input);
-  border-radius: var(--radius-sm);
-  max-height: 200px;
+  border-radius: 14px;
+  max-height: 260px;
   overflow-y: auto;
-  box-shadow: var(--shadow-lg);
-  margin-top: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+}
+
+.suggestions-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.suggestions-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
+}
+
+.suggestions-header {
+  padding: 8px 14px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  letter-spacing: 0.5px;
+  background: var(--bg-card-secondary);
 }
 
 .suggestion-item {
   padding: 10px 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 12px;
   cursor: pointer;
-  border-bottom: 1px solid #F1F5F9;
+  border-bottom: 1px solid var(--border-subtle);
   transition: background 0.15s ease;
 }
 
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
 .suggestion-item:hover {
-  background: #F8FAFC;
+  background: #F8FAFD;
+}
+
+.suggestion-item:active {
+  background: #EDF2F7;
+}
+
+.suggestion-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #E2E8F0;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1.5px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.suggestion-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 50%;
+}
+
+.suggestion-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.suggestion-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+
+.suggestion-phone {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* Dark mode support for contact suggestions */
+[data-theme="dark"] .suggestions-dropdown {
+  background: #1E293B;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .suggestions-header {
+  background: #0F172A;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .suggestion-item {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .suggestion-item:hover {
+  background: #334155;
+}
+
+[data-theme="dark"] .suggestion-item:active {
+  background: #475569;
+}
+
+[data-theme="dark"] .suggestion-avatar {
+  background: #334155;
+  color: #94A3B8;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .suggestion-name {
+  color: #F8FAFC;
+}
+
+[data-theme="dark"] .suggestion-phone {
+  color: #94A3B8;
 }
 
 /* ==========================================================================
