@@ -1741,6 +1741,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
           deviceUserInfo.innerHTML = `<strong>Linked Account:</strong> ${escapeHtml(data.user.name || "")} (${data.user.id ? data.user.id.split(":")[0] : ""})<br>${syncLabel}`;
           deviceUserInfo.style.display = "block";
+        } else if (data.hasSavedSession && !isConn) {
+          deviceUserInfo.innerHTML = `<div class="device-disconnected-guide">
+            <div class="guide-title" style="color: #F59E0B;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>WhatsApp Session Disconnected</span>
+            </div>
+            <p style="font-size: 12.5px; color: var(--text-secondary); margin: 6px 0 10px; line-height: 1.4;">
+              Your saved session is currently offline. You can reconnect to WhatsApp or pair a new device below.
+            </p>
+            <button type="button" class="btn-primary" id="btnReconnectSession" style="width: 100%; justify-content: center; padding: 10px; margin-bottom: 10px; background: #00A884;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Reconnect WhatsApp</span>
+            </button>
+            <ol class="guide-steps">
+              <li>To pair a fresh device, tap <strong>Show QR Code</strong> or <strong>8-Digit Pairing Code</strong> below</li>
+              <li>Or tap <strong>Unlink WhatsApp Account</strong> below to clear saved credentials</li>
+            </ol>
+          </div>`;
+          deviceUserInfo.style.display = "block";
+          const btnRec = document.getElementById("btnReconnectSession");
+          if (btnRec) {
+            btnRec.onclick = async () => {
+              btnRec.disabled = true;
+              btnRec.innerHTML = "<span>Connecting…</span>";
+              try {
+                await authFetch("/api/reconnect", { method: "POST" });
+                showToast("Connecting to WhatsApp…");
+                setTimeout(checkStatus, 1500);
+              } catch (err) {
+                showToast(`Reconnect error: ${err.message}`);
+              } finally {
+                btnRec.disabled = false;
+              }
+            };
+          }
         } else {
           deviceUserInfo.innerHTML = `<div class="device-disconnected-guide">
             <div class="guide-title">
@@ -1758,7 +1793,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       if (logoutBox) {
-        logoutBox.style.display = (isConn || isConnecting) ? "block" : "none";
+        logoutBox.style.display = (isConn || isConnecting || data.hasSavedSession) ? "block" : "none";
       }
 
       if (isConn) {
