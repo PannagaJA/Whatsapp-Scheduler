@@ -89,12 +89,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const currentUserRoleText = document.getElementById("currentUserRoleText");
   const btnSignOutApp = document.getElementById("btnSignOutApp");
 
-  // State: secure cookie-based authentication with CSRF tokens
+  // State: secure cookie-based authentication with Bearer token redundancy & CSRF tokens
   let authGeneration = 0;
   let csrfToken = "";
+  let authToken = "";
   let currentUser = null;
   try {
-    localStorage.removeItem("wa_auth_token");
+    authToken = localStorage.getItem("wa_auth_token") || "";
     const cachedUser = localStorage.getItem("wa_current_user");
     if (cachedUser) currentUser = JSON.parse(cachedUser);
   } catch (_) {}
@@ -123,6 +124,20 @@ document.addEventListener("DOMContentLoaded", () => {
   async function authFetch(url, options = {}) {
     options.headers = options.headers || {};
     options.credentials = "include"; // Send HttpOnly session cookies
+
+    // Attach Bearer token fallback if available (vital for WebView cookie drops across updates)
+    const effectiveToken = authToken || (function() {
+      try { return localStorage.getItem("wa_auth_token") || ""; } catch (_) { return ""; }
+    })();
+    if (effectiveToken) {
+      if (options.headers instanceof Headers) {
+        if (!options.headers.has("Authorization")) {
+          options.headers.set("Authorization", `Bearer ${effectiveToken}`);
+        }
+      } else if (!options.headers["Authorization"]) {
+        options.headers["Authorization"] = `Bearer ${effectiveToken}`;
+      }
+    }
 
     // Attach CSRF protection token for state-changing requests
     const effectiveCsrf = csrfToken || getCookie("wa_csrf");
@@ -343,9 +358,12 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.success) {
           authGeneration++;
           currentUser = data.user || { username, role: "user" };
+          if (data.token) {
+            authToken = data.token;
+            try { localStorage.setItem("wa_auth_token", authToken); } catch (_) {}
+          }
           if (data.csrfToken) csrfToken = data.csrfToken;
           try {
-            localStorage.removeItem("wa_auth_token");
             if (currentUser) localStorage.setItem("wa_current_user", JSON.stringify(currentUser));
           } catch (_) {}
           hideAuthModal();
@@ -391,6 +409,7 @@ document.addEventListener("DOMContentLoaded", () => {
         await authFetch("/api/auth/logout", { method: "POST" });
       } catch (_) {}
       csrfToken = "";
+      authToken = "";
       currentUser = null;
       try {
         localStorage.removeItem("wa_auth_token");
@@ -413,8 +432,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const capturedGen = ++authGeneration;
 
     try {
+      const headers = {};
+      const token = authToken || (function() {
+        try { return localStorage.getItem("wa_auth_token") || ""; } catch (_) { return ""; }
+      })();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const res = await fetch("/api/auth/me", {
-        credentials: "include"
+        credentials: "include",
+        headers
       });
 
       if (capturedGen !== authGeneration) return;
@@ -426,7 +454,10 @@ document.addEventListener("DOMContentLoaded", () => {
           currentUser = data.user;
           if (data.csrfToken) csrfToken = data.csrfToken;
           try {
-            localStorage.removeItem("wa_auth_token");
+            if (token) {
+              authToken = token;
+              localStorage.setItem("wa_auth_token", token);
+            }
             if (currentUser) localStorage.setItem("wa_current_user", JSON.stringify(currentUser));
           } catch (_) {}
           updateCurrentUserDisplay();
@@ -435,10 +466,21 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
+      // If 401 received while having cached credentials during initial boot,
+      // retry with backoff up to 3 times before declaring session definitively expired
+      // (safeguards against SQLite connection delay / temporary redeployment window)
       if (res.status === 401) {
+        if (currentUser && attempt <= 3) {
+          const delay = 1200 * attempt;
+          clearTimeout(authRetryTimer);
+          authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
+          return;
+        }
+
         if (capturedGen !== authGeneration) return;
         authGeneration++;
         currentUser = null;
+        authToken = "";
         csrfToken = "";
         try {
           localStorage.removeItem("wa_auth_token");
@@ -450,9 +492,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // Backend server error (502/503/504/500) during reboot or reload: retry with backoff
-      if (res.status >= 500 && attempt < 5) {
+      if (res.status >= 500 && attempt < 6) {
         if (capturedGen !== authGeneration) return;
-        const delay = Math.min(1000 * Math.pow(1.5, attempt), 5000);
+        const delay = Math.min(1000 * Math.pow(1.5, attempt), 6000);
         clearTimeout(authRetryTimer);
         authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
         return;
@@ -466,8 +508,8 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (_) {
       if (capturedGen !== authGeneration) return;
       // Network error (server restarting, waking up, or offline): retry with backoff
-      if (attempt < 5) {
-        const delay = Math.min(1000 * Math.pow(1.5, attempt), 5000);
+      if (attempt < 6) {
+        const delay = Math.min(1000 * Math.pow(1.5, attempt), 6000);
         clearTimeout(authRetryTimer);
         authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
         return;
