@@ -463,6 +463,16 @@ app.get("/api/qr", requireAuth, async (req, res) => {
   }
 });
 
+// API: Reconnect WhatsApp Session
+app.post("/api/reconnect", requireAuth, async (req, res) => {
+  try {
+    const status = await getStatus(req.user.id, { forceInit: true });
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // API: Request 8-digit Pairing Code (Protected by Pairing Limiter)
 app.post("/api/pair-code", requireAuth, pairingLimiter, async (req, res) => {
   try {
