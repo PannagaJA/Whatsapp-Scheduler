@@ -194,7 +194,7 @@ class UserWhatsAppSession {
           const isLoggedOut = (statusCode === DisconnectReason.loggedOut || statusCode === 401) && !isRestartRequired;
           const wasRegistered = Boolean(this.userProfile || currentSock.authState?.creds?.registered || currentSock.authState?.creds?.account || currentSock.authState?.creds?.me);
 
-          // Retry on unexpected 401 disconnects across server restarts before wiping credentials
+          // Retry on unexpected 401 disconnects across server restarts before giving up
           if (isLoggedOut && wasRegistered) {
             this._loggedOutRetryCount = (this._loggedOutRetryCount || 0) + 1;
             if (this._loggedOutRetryCount < 3) {
@@ -215,20 +215,13 @@ class UserWhatsAppSession {
               return;
             }
 
-            console.log(`[WhatsApp Engine ${this.userId}] WhatsApp unlinked confirmed. Resetting auth state...`);
-            this.isExplicitlyLoggedOut = true;
+            console.log(`[WhatsApp Engine ${this.userId}] WhatsApp session disconnected (401). Preserving credentials on disk...`);
+            this.connectionStatus = "disconnected";
             this._loggedOutRetryCount = 0;
             if (this.sock === currentSock) {
               this.sock = null;
             }
-            try { await currentSock.logout(); } catch (_) {
-              try { currentSock.end(new Error("Logged out")); } catch (_) {}
-            }
-            try { fs.rmSync(this.authDir, { recursive: true, force: true }); } catch (_) {}
-            try {
-              await run("INSERT INTO settings (user_id, key, value) VALUES (?, 'phonebook_imported', '0') ON CONFLICT(user_id, key) DO UPDATE SET value = '0'", [this.userId]);
-              await run("DELETE FROM contacts WHERE user_id = ?", [this.userId]);
-            } catch (_) {}
+            try { currentSock.end(new Error("Disconnected (401)")); } catch (_) {}
             return;
           }
 
@@ -922,18 +915,33 @@ async function initAllActiveSessions() {
     await migrateLegacyAuthState();
     const encryptionKey = getSessionEncryptionKey();
     if (!fs.existsSync(SESSIONS_BASE_DIR)) return;
+
+    // Load registered user IDs to instantly restore valid user sessions without scanning dead test dirs
+    let registeredUserIds = null;
+    try {
+      const users = await all("SELECT id FROM users");
+      if (users && users.length > 0) {
+        registeredUserIds = new Set(users.map(u => u.id));
+      }
+    } catch (_) {}
+
     const sessionUserDirs = fs.readdirSync(SESSIONS_BASE_DIR);
     for (const userId of sessionUserDirs) {
+      if (registeredUserIds && !registeredUserIds.has(userId)) {
+        continue;
+      }
       const authDir = path.join(SESSIONS_BASE_DIR, userId, "auth_info_baileys");
       const credsFile = path.join(authDir, "creds.json");
       if (fs.existsSync(credsFile)) {
         try {
           migrateSessionDirectory(authDir, encryptionKey);
           const creds = readDecryptedJson(credsFile, encryptionKey);
-          if (creds && (creds.registered || creds.me)) {
+          if (creds && (creds.registered || creds.me || creds.account)) {
             console.log(`[WhatsApp Engine ${userId}] Resuming authenticated WhatsApp session on startup...`);
             const session = getOrCreateUserSession(userId);
-            await session.init();
+            session.init().catch(err => {
+              console.error(`[WhatsApp Engine ${userId}] Error initializing session on startup:`, err.message);
+            });
           }
         } catch (e) {
           console.error(`[WhatsApp Engine ${userId}] Error restoring creds on boot:`, e.message);
@@ -947,19 +955,27 @@ async function initAllActiveSessions() {
 
 // Gracefully close all active sockets during server restart or shutdown
 async function closeAllActiveSessions() {
+  const closeTasks = [];
   for (const [userId, session] of userSessions.entries()) {
     session.clearReconnectTimer();
     if (session.sock) {
       const sock = session.sock;
       session.sock = null;
-      try {
-        if (sock.ev && typeof sock.ev.removeAllListeners === "function") {
-          sock.ev.removeAllListeners();
-        }
-        sock.end(undefined);
-      } catch (_) {}
+      closeTasks.push(new Promise((resolve) => {
+        try {
+          if (sock.ev && typeof sock.ev.removeAllListeners === "function") {
+            sock.ev.removeAllListeners();
+          }
+          if (sock.ws && sock.ws.isOpen) {
+            sock.end(undefined);
+          }
+        } catch (_) {}
+        resolve();
+      }));
     }
   }
+  await Promise.all(closeTasks);
+  await new Promise(r => setTimeout(r, 200));
 }
 
 // Cleanup session resources on user deletion
