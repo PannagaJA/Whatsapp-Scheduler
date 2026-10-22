@@ -169,37 +169,37 @@ async function requireAuth(req, res, next) {
     let authSource = null;
 
     // 1. Inspect HttpOnly session cookie first
+    let user = null;
     const cookies = req.cookies || parseCookies(req);
     if (cookies.wa_session) {
-      token = cookies.wa_session;
-      authSource = "cookie";
-    }
-
-    // 2. Fall back to Authorization / X-Auth-Token headers (API clients, WebView, migration)
-    if (!token) {
-      const authHeader = req.headers.authorization || req.headers["x-auth-token"];
-      if (authHeader) {
-        if (authHeader.startsWith("Bearer ")) {
-          token = authHeader.slice(7).trim();
-        } else {
-          token = authHeader.trim();
-        }
-        authSource = "bearer";
+      user = await validateSession(cookies.wa_session);
+      if (user) {
+        token = cookies.wa_session;
+        authSource = "cookie";
       }
     }
 
-    if (!token) {
+    // 2. Fall back to Authorization / X-Auth-Token headers (API clients, WebView, or when cookie is stale)
+    if (!user) {
+      const authHeader = req.headers.authorization || req.headers["x-auth-token"];
+      if (authHeader) {
+        const candidateToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : authHeader.trim();
+        user = await validateSession(candidateToken);
+        if (user) {
+          token = candidateToken;
+          authSource = "bearer";
+          // Automatically re-synchronize HttpOnly cookie from valid Bearer token
+          try {
+            setAuthCookies(res, candidateToken);
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (!user || !token) {
       return res.status(401).json({
         success: false,
         error: "Authentication required. Please sign in."
-      });
-    }
-
-    const user = await validateSession(token);
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: "Session expired or invalid. Please sign in again."
       });
     }
 
