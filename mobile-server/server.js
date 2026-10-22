@@ -283,6 +283,7 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({
     success: true,
     user: req.user,
+    token: req.sessionToken,
     csrfToken
   });
 });
@@ -782,6 +783,7 @@ if (require.main === module) {
 
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGUSR2", () => gracefulShutdown("SIGUSR2"));
   }).catch((err) => {
     console.error("Failed to initialize database on boot:", err);
     process.exit(1);
