@@ -558,25 +558,28 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data?.user) {
           currentUser = data.user;
           if (data.csrfToken) csrfToken = data.csrfToken;
-          try {
-            if (token) {
-              authToken = token;
-              localStorage.setItem("wa_auth_token", token);
-            }
-            if (currentUser) localStorage.setItem("wa_current_user", JSON.stringify(currentUser));
-          } catch (_) {}
+          if (data.token) {
+            authToken = data.token;
+            try { localStorage.setItem("wa_auth_token", authToken); } catch (_) {}
+          } else if (token) {
+            authToken = token;
+            try { localStorage.setItem("wa_auth_token", token); } catch (_) {}
+          }
+          if (currentUser) {
+            try { localStorage.setItem("wa_current_user", JSON.stringify(currentUser)); } catch (_) {}
+          }
           updateCurrentUserDisplay();
           hideAuthModal();
           return;
         }
       }
 
-      // If 401 received while having cached credentials during initial boot,
-      // retry with backoff up to 3 times before declaring session definitively expired
-      // (safeguards against SQLite connection delay / temporary redeployment window)
+      // If 401 received while having cached credentials during initial boot or server reload,
+      // retry with backoff up to 8 times before declaring session definitively expired
+      // (safeguards against SQLite connection delay, temporary redeployment, or watch reboots)
       if (res.status === 401) {
-        if (currentUser && attempt <= 3) {
-          const delay = 1200 * attempt;
+        if ((currentUser || token) && attempt <= 8) {
+          const delay = Math.min(1200 * attempt, 4500);
           clearTimeout(authRetryTimer);
           authRetryTimer = setTimeout(() => verifyInitialAuth(attempt + 1), delay);
           return;
