@@ -205,7 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
       currentUsernameText.textContent = (currentUser && currentUser.username) ? currentUser.username : "Guest";
     }
     if (currentUserRoleText) {
-      currentUserRoleText.textContent = (currentUser && currentUser.role === "admin") ? "Administrator 👑" : "User";
+      currentUserRoleText.textContent = (currentUser && currentUser.role === "admin") ? "Administrator" : "User";
     }
     const heroGreetingName = document.getElementById("heroGreetingName");
     if (heroGreetingName) {
@@ -2714,7 +2714,7 @@ document.addEventListener("DOMContentLoaded", () => {
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span style="font-weight: 600; font-size: 14px; color: var(--text-primary); word-break: break-all;">${escapeHtml(u.username)}</span>
                 <span style="font-size: 11px; padding: 2px 7px; border-radius: 9999px; font-weight: 600; background: ${u.role === 'admin' ? 'rgba(247, 166, 0, 0.15)' : 'rgba(255, 255, 255, 0.08)'}; color: ${u.role === 'admin' ? '#f7a600' : 'var(--text-secondary)'};">
-                  ${u.role === 'admin' ? 'Admin 👑' : 'User'}
+                  ${u.role === 'admin' ? 'Admin' : 'User'}
                 </span>
                 <span style="font-size: 11px; padding: 2px 7px; border-radius: 9999px; font-weight: 500; background: ${u.whatsappStatus === 'connected' ? 'rgba(0, 168, 132, 0.15)' : 'rgba(102, 119, 129, 0.15)'}; color: ${u.whatsappStatus === 'connected' ? '#00a884' : 'var(--text-muted)'};">
                   ${waStatusText}
