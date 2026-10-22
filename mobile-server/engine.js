@@ -104,15 +104,21 @@ class UserWhatsAppSession {
         console.error(`[WhatsApp Engine ${this.userId}] Session migration warning:`, migErr.message);
       }
 
-      // Clear any leftover unconfirmed pairing state before loading auth state so registration can succeed
+      // Clear only transient unconfirmed pairing codes (where pairing was abandoned before completion)
       const credsFile = path.join(this.authDir, "creds.json");
       if (fs.existsSync(credsFile)) {
         try {
           const raw = readDecryptedJson(credsFile, encryptionKey);
-          if (raw && raw.me && !raw.registered && !raw.account) {
+          if (raw && raw.pairingCode && raw.me && !raw.registered && !raw.account && raw.me.name === "~") {
             delete raw.me;
             delete raw.pairingCode;
             writeEncryptedJson(credsFile, raw, encryptionKey);
+          } else if (raw && raw.me && (raw.me.id || raw.me.lid) && !raw.pairingCode) {
+            // Ensure confirmed linked accounts are explicitly flagged as registered so Baileys resumes seamlessly
+            if (!raw.registered) {
+              raw.registered = true;
+              writeEncryptedJson(credsFile, raw, encryptionKey);
+            }
           }
         } catch (_) {}
       }
@@ -253,6 +259,11 @@ class UserWhatsAppSession {
           this.userProfile = this.sock.user || this.sock.authState?.creds?.me;
           this._loggedOutRetryCount = 0;
           console.log(`[WhatsApp Engine ${this.userId}] Connected successfully as: ${this.userProfile?.name || this.userProfile?.id}`);
+
+          // Explicitly mark session registered in authState so it is never mistaken for unconfirmed pairing
+          if (this.sock?.authState?.creds) {
+            this.sock.authState.creds.registered = true;
+          }
 
           // Immediately persist confirmed credentials to creds.json on disk
           try {
@@ -966,8 +977,8 @@ async function closeAllActiveSessions() {
           if (sock.ev && typeof sock.ev.removeAllListeners === "function") {
             sock.ev.removeAllListeners();
           }
-          if (sock.ws && sock.ws.isOpen) {
-            sock.end(undefined);
+          if (typeof sock.end === "function") {
+            try { sock.end(undefined); } catch (_) {}
           }
         } catch (_) {}
         resolve();
