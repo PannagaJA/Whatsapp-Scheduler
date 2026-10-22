@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "node --watch --watch-path=server.js --watch-path=engine.js --watch-path=auth.js --watch-path=db.js --watch-path=scheduler.js --watch-path=sessionCrypto.js --watch-path=fileValidator.js --watch-path=rateLimiter.js --watch-path=pwa server.js",
     "test": "node test/run-all-tests.js"
   },
   "keywords": [
