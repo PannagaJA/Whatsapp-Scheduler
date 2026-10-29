@@ -11,9 +11,27 @@
 [![Tests Passing](https://img.shields.io/badge/Tests-103%2F103%20Passing-brightgreen)](#-test-suite--quality-assurance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-[Features](#-key-features) • [Architecture](#-architecture-overview) • [Deployment](#-production-deployment) • [Admin Setup](#-administrator-provisioning) • [Android Companion](#-native-android-companion-app) • [Configuration](#-environment-variables)
+[About](#-about-the-project) • [Features](#-key-features) • [Architecture](#-architecture-overview) • [Deployment](#-production-deployment) • [Admin Setup](#-administrator-provisioning) • [Android Companion](#-native-android-companion-app) • [Configuration](#-environment-variables)
 
 </div>
+
+---
+
+## 📖 About The Project
+
+**WhatsApp 24/7 Cloud & Android Mobile Scheduler** is an autonomous, privacy-centric messaging automation platform engineered to schedule and deliver WhatsApp messages around the clock—completely independent of your phone's battery, power state, or network connection.
+
+### The Problem It Solves
+Traditional mobile scheduler apps rely on Android Accessibility Services, simulated UI gestures, or persistent background services that require the physical device to stay powered on, unlocked, and connected to the internet. If the phone battery drains, enters aggressive OS battery optimization (Doze mode), or loses network signal, scheduled dispatches fail silently without warning.
+
+### The Solution
+This platform decouples message delivery from your physical handset:
+- **Cloud-Native Autonomous Execution**: Operates as a persistent 24/7 background service on any cloud host (Render, VPS, Docker, or local server) using the Baileys Multi-Device protocol as an authorized linked device.
+- **Reliable Set-and-Forget Dispatch**: Schedule one-time alerts, recurring birthday/anniversary greetings, enterprise reminders, or media attachments. The cloud worker dispatches them on time—even if your mobile phone is powered off or in airplane mode.
+- **Multi-Tenant Privacy & Isolation**: Engineered from the ground up with strict tenant isolation. WhatsApp credentials, SQLite databases, encryption keys, uploaded media, and dispatch histories are strictly segmented per user account with Argon2id authentication and defense-in-depth protections.
+- **Unified Cross-Platform Experience**: Manage schedules on the go through a responsive Progressive Web App (PWA) with native Web Share Target support, or via an ultra-lightweight (~2.3 MB) native Android companion app featuring native phonebook synchronization and in-app OTA updates.
+
+> **Disclaimer**: *This project is an independent open-source tool developed for personal and authorized productivity automation. It is NOT affiliated with, authorized, maintained, sponsored, or endorsed by WhatsApp Inc., Meta Platforms, Inc., or any of their affiliates or subsidiaries. Always use responsibly and in compliance with WhatsApp's Terms of Service.*
 
 ---
 

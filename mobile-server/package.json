@@ -16,8 +16,16 @@
     "automation",
     "mobile"
   ],
-  "author": "",
+  "author": "PannagaJA",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PannagaJA/Whatsapp-Scheduler.git"
+  },
+  "homepage": "https://github.com/PannagaJA/Whatsapp-Scheduler#readme",
+  "bugs": {
+    "url": "https://github.com/PannagaJA/Whatsapp-Scheduler/issues"
+  },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.8",
     "cors": "^2.8.5",
