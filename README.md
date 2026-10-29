@@ -1,6 +1,8 @@
-# 📱 WhatsApp 24/7 Cloud & Android Mobile Scheduler
-
 <div align="center">
+
+<img src="app%20logo.png" alt="WhatsApp Scheduler Logo" width="128" height="128" />
+
+# WhatsApp 24/7 Cloud & Android Mobile Scheduler
 
 **A high-performance, enterprise-grade 24/7 WhatsApp message scheduler powered by Baileys Multi-Device engine with strict multi-user tenant isolation, a responsive PWA, and a featherweight native Android companion app with real-time OTA updates.**
 
